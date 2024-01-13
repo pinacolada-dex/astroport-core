@@ -1,8 +1,6 @@
-# Astroport Core
+# Pina Colada
 
-[![codecov](https://codecov.io/gh/astroport-fi/astroport-core/branch/main/graph/badge.svg?token=ROOLZTGZMM)](https://codecov.io/gh/astroport-fi/astroport-core)
-
-Multi pool type automated market-maker (AMM) protocol powered by smart contracts on the [Terra](https://terra.money) blockchain.
+Automated market-maker (AMM) protocol w/ built in community incentives.
 
 ## Contracts diagram
 

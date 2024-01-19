@@ -368,6 +368,75 @@ fn receive_cw20(
 /// If no custom receiver is specified, the pair will mint LP tokens for the function caller.
 ///
 /// NOTE - the address that wants to provide liquidity should approve the pair contract to pull its relevant tokens.
+
+/* Assuming we have functions or messages to interact with the Pool Manager
+// and a way to reference the Pool Manager, e.g., through its address
+
+#[entry_point]
+pub fn provide_liquidity(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    mut assets: Vec<Asset>,
+    slippage_tolerance: Option<Decimal>,
+    auto_stake: Option<bool>,
+    receiver: Option<String>,
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
+
+    // Step 1: Acquire lock from Pool Manager
+    let pool_manager_addr = /* address of the Pool Manager contract */;
+    let acquire_lock_msg = /* Message to Pool Manager to acquire lock */;
+    let lock_acquired = deps.querier.query::<bool>(&acquire_lock_msg)?;
+
+    // Step 2: Check if lock is acquired successfully
+    if !lock_acquired {
+        return Err(ContractError::LockAcquisitionFailed {});
+    }
+
+    // Step 3: Call internal function to proceed with the operation
+    let response = internal_provide_liquidity(
+        deps, 
+        env, 
+        info, 
+        assets, 
+        slippage_tolerance, 
+        auto_stake, 
+        receiver,
+        &config
+    )?;
+
+    // Step 4: Release the lock
+    let release_lock_msg = /* Message to Pool Manager to release lock */;
+    deps.querier.query::<bool>(&release_lock_msg)?;
+
+    Ok(response)
+}
+
+fn internal_provide_liquidity(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    assets: Vec<Asset>,
+    slippage_tolerance: Option<Decimal>,
+    auto_stake: Option<bool>,
+    receiver: Option<String>,
+    config: &Config,
+) -> Result<Response, ContractError> {
+    // Logic for providing liquidity goes here
+    // This involves interacting with the Pool Manager to get and set the pool state
+
+    // Example: Modify the pool state based on the assets provided
+    // ...
+
+    // Return response
+    Ok(Response::new()
+        .add_attribute("action", "provide_liquidity")
+        // ... other attributes ...
+    )
+}
+*/
+
 pub fn provide_liquidity(
     deps: DepsMut,
     env: Env,
@@ -583,6 +652,85 @@ pub fn provide_liquidity(
 
     Ok(Response::new().add_messages(messages).add_attributes(attrs))
 }
+/*
+// Assuming you have a constant or a way to get the Pool Manager's address
+const POOL_MANAGER_ADDR: &str = "pool_manager_contract_address";
+
+#[entry_point]
+pub fn withdraw_liquidity(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    sender: Addr,
+    amount: Uint128,
+    assets: Vec<Asset>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    // Prepare the message for acquiring a lock from the Pool Manager
+    let acquire_lock_msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: POOL_MANAGER_ADDR.to_string(),
+        msg: to_binary(&PoolManagerExecuteMsg::AcquireLock { pool_addr: env.contract.address.clone() })?,
+        funds: vec![],
+    }));
+
+    // Prepare the callback message for the `lock_acquired` method
+    let lock_acquired_msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_binary(&SelfExecuteMsg::LockAcquiredWithdrawLiquidity {
+            sender: sender.clone(),
+            amount,
+            assets: assets.clone(),
+            config: config.clone(),
+        })?,
+        funds: vec![],
+    }));
+
+    Ok(Response::new()
+        .add_submessage(acquire_lock_msg)
+        .add_submessage(lock_acquired_msg)
+        .add_attribute("method", "withdraw_liquidity"))
+}
+
+// Define the self-executing message for when the lock is acquired
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub enum SelfExecuteMsg {
+    LockAcquiredWithdrawLiquidity {
+        sender: Addr,
+        amount: Uint128,
+        assets: Vec<Asset>,
+        config: Config,
+    },
+    // ... other self messages ...
+}
+
+// Implement the handling of the lock acquired callback
+#[entry_point]
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
+    match msg {
+        ExecuteMsg::LockAcquiredWithdrawLiquidity { sender, amount, assets, config } => {
+            // Perform the actual liquidity withdrawal logic here
+            // This might involve interacting with the Pool Manager to update the pool state
+            // and releasing the lock afterward
+
+            // Example logic (simplified for demonstration):
+            // Calculate the amount of each asset to return based on the amount of LP tokens
+            // Update the pool's state in Pool Manager
+            // Burn LP tokens
+            // Send back assets to the sender
+
+            // Don't forget to release the lock at the end
+            Ok(Response::new().add_attribute("action", "withdraw_liquidity"))
+        },
+        // ... handle other messages ...
+    }
+}
+*/
 
 /// Withdraw liquidity from the pool.
 ///

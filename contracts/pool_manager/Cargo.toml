@@ -1,0 +1,49 @@
+[package]
+name = "pool-manager"
+version = "1.0.2"
+authors = [
+  "johhonn <johhonn@users.noreply.github.com>",
+  "oraclethacat" 
+]
+edition = "2018"
+description = "Pool Manager Concentrated Liquidity contract"
+keywords = ["CosmWasm"]
+repository = ""
+homepage = ""
+documentation = ""
+license = "Apache-2.0"
+
+exclude = [
+  # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+  "contract.wasm",
+  "hash.txt",
+]
+
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# for quicker tests, cargo test --lib
+# for more explicit tests, cargo test --features=backtraces
+backtraces = ["cosmwasm-std/backtraces"]
+library = []
+
+[dependencies]
+cosmwasm-std = "1.1"
+astroport = { path = "../../packages/astroport", version = "3" }
+cw-storage-plus = "0.15"
+cw2 = "0.15"
+thiserror = "1.0"
+protobuf = { version = "2", features = ["with-bytes"] }
+itertools = "0.10"
+cosmwasm-schema = "1.1"
+cw-utils = "1.0.1"
+
+[dev-dependencies]
+cw-multi-test = "0.15"
+astroport-token = { path = "../token" }
+astroport-pair = { path = "../pair" }
+cw20 = "0.15"
+anyhow = "1.0"
+prost = "0.11.5"

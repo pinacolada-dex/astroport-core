@@ -2,7 +2,28 @@ use cosmwasm_std::{
     to_binary, Binary, DepsMut, Env, MessageInfo, Response, StdResult, Storage, Uint128,
     ContractError, Addr,
 };
+use std::collections::HashSet;
+
+#[cfg(not(feature = "library"))]
+use cosmwasm_std::entry_point;
+use cosmwasm_std::{
+    attr, from_binary, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Reply,
+    ReplyOn, Response, StdError, StdResult, SubMsg, SubMsgResponse, SubMsgResult, WasmMsg,
+};
+use cw2::{get_contract_version, set_contract_version};
+use cw_utils::parse_instantiate_response_data;
+
+use astroport::asset::{addr_opt_validate, AssetInfo, PairInfo};
+use astroport::common::{claim_ownership, drop_ownership_proposal, propose_new_owner};
+use astroport::factory::{
+    Config, ConfigResponse, ExecuteMsg, FeeInfoResponse, InstantiateMsg, MigrateMsg, PairConfig,
+    PairType, PairsResponse, QueryMsg,
+};
+use astroport::generator::ExecuteMsg::DeactivatePool;
+use astroport::pair::InstantiateMsg as PairInstantiateMsg;
+use itertools::Itertools;
 use std::collections::HashMap;
+
 
 // Define the structure for your pool's state
 #[derive(Clone, Debug, PartialEq)]

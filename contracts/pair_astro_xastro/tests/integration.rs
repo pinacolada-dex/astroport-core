@@ -244,7 +244,31 @@ fn assert_user_balance(router: &mut App, token: &Addr, user: &Addr, expected_bal
         .unwrap();
     assert_eq!(balance.balance, Uint128::from(expected_balance));
 }
+#[test]
+fn test_formatting() {
+    let owner = Addr::unchecked("owner");
 
+    let mut router = mock_app(owner.clone(), vec![]);
+
+    let pair_code_id = store_pair_code(&mut router);
+
+    let factory_instance = instantiate_factory_contract(&mut router, owner.clone(), pair_code_id);
+    let token_instance = instantiate_token(&mut router, owner.clone());
+
+    let (staking_instance, xastro_instance) =
+        instantiate_staking(&mut router, owner.clone(), &token_instance);
+
+    let asset_infos = vec![
+        AssetInfo::Token {
+            contract_addr: token_instance.clone(),
+        },
+        AssetInfo::Token {
+            contract_addr: xastro_instance.clone(),
+        },
+    ];
+    println!("{:?}", token_instance);
+    println!("{}", format!("{}{}", asset_infos[0], asset_infos[1]));
+}
 #[test]
 fn test_pair_instantiation() {
     let owner = Addr::unchecked("owner");

@@ -43,8 +43,11 @@ pub const POOLS:Map<String,Config> = Map:new("pools");
         fee_share: None,
     };
  */
-
-
+pub struct Pair_Balance{
+    tokenA:Uint128,
+    tokenB:Uint128
+}
+pub const PAIR_BALANCE:Map<String,Pair_Balance> = Map:new("pair_balances");
 /// Stores asset balances to query them later at any block height
 pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances",
@@ -57,7 +60,7 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
 impl Config{
     //Create key by ordering the pair token Addresses Alphabetically then concatenating
     fn create_key(&self)->String{
-        let key=format!("{}",self.pair_info.asset_infos);
+        let key=format!("{}{}",self.pair_info.asset_infos[0],self.pair_info.asset_infos[1]);
         String::from(key);
     }
 }

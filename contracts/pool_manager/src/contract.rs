@@ -14,11 +14,12 @@ use astroport::router::{
 };
 
 use crate::error::ContractError;
+use crate::handlers::execute_swap_operations;
 use crate::operations::execute_swap_operation;
 use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA};
 
 /// Contract name that is used for migration.
-const CONTRACT_NAME: &str = "astroport-router";
+const CONTRACT_NAME: &str = "pina-colada";
 /// Contract version that is used for migration.
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -131,67 +132,7 @@ pub fn receive_cw20(
 /// * **minimum_receive** used to guarantee that the ask amount is above a minimum amount.
 ///
 /// * **to** recipient of the ask tokens.
-#[allow(clippy::too_many_arguments)]
-pub fn execute_swap_operations(
-    deps: DepsMut,
-    env: Env,
-    sender: Addr,
-    operations: Vec<SwapOperation>,
-    minimum_receive: Option<Uint128>,
-    to: Option<String>,
-    max_spread: Option<Decimal>,
-) -> Result<Response, ContractError> {
-    assert_operations(deps.api, &operations)?;
 
-    let to = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
-    let target_asset_info = operations.last().unwrap().get_target_asset_info();
-    let operations_len = operations.len();
-    /// TODO Replace with internal handler
-    /*let messages = operations
-        .into_iter()
-        .enumerate()
-        .map(|(operation_index, op)| {
-            if operation_index == operations_len - 1 {
-                wasm_execute(
-                    env.contract.address.to_string(),
-                    &ExecuteMsg::ExecuteSwapOperation {
-                        operation: op,
-                        to: Some(to.to_string()),
-                        max_spread,
-                        single: operations_len == 1,
-                    },
-                    vec![],
-                )
-                .map(|inner_msg| SubMsg::reply_on_success(inner_msg, AFTER_SWAP_REPLY_ID))
-            } else {
-                wasm_execute(
-                    env.contract.address.to_string(),
-                    &ExecuteMsg::ExecuteSwapOperation {
-                        operation: op,
-                        to: None,
-                        max_spread,
-                        single: operations_len == 1,
-                    },
-                    vec![],
-                )
-                .map(SubMsg::new)
-            }
-        })
-        .collect::<StdResult<Vec<_>>>()?;
-
-    let prev_balance = target_asset_info.query_pool(&deps.querier, &to)?;
-    REPLY_DATA.save(
-        deps.storage,
-        &ReplyData {
-            asset_info: target_asset_info,
-            prev_balance,
-            minimum_receive,
-            receiver: to.to_string(),
-        },
-    )?;
-    **/
-    Ok(Response::new().add_submessages(messages))
-}
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
@@ -330,7 +271,7 @@ fn simulate_swap_operations(
         }
     }
 
-    Ok(SimulateSwapOperationsResponse {
+    Ok(SimulateSwapOperationsResponse {``
         amount: return_amount,
     })
 }

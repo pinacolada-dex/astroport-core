@@ -17,7 +17,7 @@ use crate::error::ContractError;
 use crate::handlers::execute_swap_operations;
 use crate::operations::execute_swap_operation;
 use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA};
-
+use crate::msg::ExecuteMsg;
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
 /// Contract version that is used for migration.
@@ -73,7 +73,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Receive(msg) => receive_cw20(deps, env, msg),
+        
         ExecuteMsg::ExecuteSwapOperations {
             operations,
             minimum_receive,
@@ -94,34 +94,11 @@ pub fn execute(
             max_spread,
             single,
         } => execute_swap_operation(deps, env, info, operation, to, max_spread, single),
-    }
+        ExecuteMsg::CreatePairMsg{}=>execute_create_pair(),
+        ExecuteMsg::ProvideLiquidity{}=>execute_provide_liquidity()
+    }  
 }
 
-/// Receives a message of type [`Cw20ReceiveMsg`] and processes it depending on the received template.
-///
-/// * **cw20_msg** is an object of type [`Cw20ReceiveMsg`].
-pub fn receive_cw20(
-    deps: DepsMut,
-    env: Env,
-    cw20_msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
-    match from_binary(&cw20_msg.msg)? {
-        Cw20HookMsg::ExecuteSwapOperations {
-            operations,
-            minimum_receive,
-            to,
-            max_spread,
-        } => execute_swap_operations(
-            deps,
-            env,
-            Addr::unchecked(cw20_msg.sender),
-            operations,
-            minimum_receive,
-            to,
-            max_spread,
-        ),
-    }
-}
 
 /// Performs swap operations with the specified parameters.
 ///
@@ -222,218 +199,3 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
         .add_attribute("new_contract_version", CONTRACT_VERSION))
 }
 
-/// Returns the end result of a simulation for one or multiple swap
-/// operations using a [`SimulateSwapOperationsResponse`] object.
-///
-/// * **offer_amount** amount of offer assets being swapped.
-///
-/// * **operations** is a vector that contains objects of type [`SwapOperation`].
-/// These are all the swap operations for which we perform a simulation.
-fn simulate_swap_operations(
-    deps: Deps,
-    offer_amount: Uint128,
-    operations: Vec<SwapOperation>,
-) -> Result<SimulateSwapOperationsResponse, ContractError> {
-    assert_operations(deps.api, &operations)?;
-
-    let config = CONFIG.load(deps.storage)?;
-    let astroport_factory = config.astroport_factory;
-    let mut return_amount = offer_amount;
-
-    for operation in operations.into_iter() {
-        match operation {
-            SwapOperation::AstroSwap {
-                offer_asset_info,
-                ask_asset_info,
-            } => {
-                let pair_info = query_pair_info(
-                    &deps.querier,
-                    astroport_factory.clone(),
-                    &[offer_asset_info.clone(), ask_asset_info.clone()],
-                )?;
-
-                let res: SimulationResponse = deps.querier.query_wasm_smart(
-                    pair_info.contract_addr,
-                    &PairQueryMsg::Simulation {
-                        offer_asset: Asset {
-                            info: offer_asset_info.clone(),
-                            amount: return_amount,
-                        },
-                        ask_asset_info: Some(ask_asset_info.clone()),
-                    },
-                )?;
-
-                return_amount = res.return_amount;
-            }
-            SwapOperation::NativeSwap { .. } => {
-                return Err(ContractError::NativeSwapNotSupported {})
-            }
-        }
-    }
-
-    Ok(SimulateSwapOperationsResponse {``
-        amount: return_amount,
-    })
-}
-
-/// Validates swap operations.
-///
-/// * **operations** is a vector that contains objects of type [`SwapOperation`]. These are all the swap operations we check.
-fn assert_operations(api: &dyn Api, operations: &[SwapOperation]) -> Result<(), ContractError> {
-    let operations_len = operations.len();
-    if operations_len == 0 {
-        return Err(ContractError::MustProvideOperations {});
-    }
-
-    if operations_len > MAX_SWAP_OPERATIONS {
-        return Err(ContractError::SwapLimitExceeded {});
-    }
-
-    let mut prev_ask_asset: Option<AssetInfo> = None;
-
-    for operation in operations {
-        let (offer_asset, ask_asset) = match operation {
-            SwapOperation::AstroSwap {
-                offer_asset_info,
-                ask_asset_info,
-            } => (offer_asset_info.clone(), ask_asset_info.clone()),
-            SwapOperation::NativeSwap { .. } => {
-                return Err(ContractError::NativeSwapNotSupported {})
-            }
-        };
-
-        offer_asset.check(api)?;
-        ask_asset.check(api)?;
-
-        if offer_asset.equal(&ask_asset) {
-            return Err(ContractError::DoublingAssetsPath {
-                offer_asset: offer_asset.to_string(),
-                ask_asset: ask_asset.to_string(),
-            });
-        }
-
-        if let Some(prev_ask_asset) = prev_ask_asset {
-            if prev_ask_asset != offer_asset {
-                return Err(ContractError::InvalidPathOperations {
-                    prev_ask_asset: prev_ask_asset.to_string(),
-                    next_offer_asset: offer_asset.to_string(),
-                    next_ask_asset: ask_asset.to_string(),
-                });
-            }
-        }
-
-        prev_ask_asset = Some(ask_asset);
-    }
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod testing {
-    use super::*;
-
-    #[test]
-    fn test_invalid_operations() {
-        use cosmwasm_std::testing::mock_dependencies;
-        let deps = mock_dependencies();
-        // Empty error
-        assert_eq!(true, assert_operations(deps.as_ref().api, &[]).is_err());
-
-        // uluna output
-        assert_eq!(
-            true,
-            assert_operations(
-                deps.as_ref().api,
-                &vec![
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::NativeToken {
-                            denom: "ukrw".to_string(),
-                        },
-                        ask_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                    },
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                        ask_asset_info: AssetInfo::NativeToken {
-                            denom: "uluna".to_string(),
-                        },
-                    },
-                ]
-            )
-            .is_ok()
-        );
-
-        // asset0002 output
-        assert_eq!(
-            true,
-            assert_operations(
-                deps.as_ref().api,
-                &vec![
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::NativeToken {
-                            denom: "ukrw".to_string(),
-                        },
-                        ask_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                    },
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                        ask_asset_info: AssetInfo::NativeToken {
-                            denom: "uluna".to_string(),
-                        },
-                    },
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::NativeToken {
-                            denom: "uluna".to_string(),
-                        },
-                        ask_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0002"),
-                        },
-                    },
-                ]
-            )
-            .is_ok()
-        );
-
-        // Multiple output token type errors
-        assert_eq!(
-            true,
-            assert_operations(
-                deps.as_ref().api,
-                &vec![
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::NativeToken {
-                            denom: "ukrw".to_string(),
-                        },
-                        ask_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                    },
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0001"),
-                        },
-                        ask_asset_info: AssetInfo::NativeToken {
-                            denom: "uaud".to_string(),
-                        },
-                    },
-                    SwapOperation::AstroSwap {
-                        offer_asset_info: AssetInfo::NativeToken {
-                            denom: "uluna".to_string(),
-                        },
-                        ask_asset_info: AssetInfo::Token {
-                            contract_addr: Addr::unchecked("asset0002"),
-                        },
-                    },
-                ]
-            )
-            .is_err()
-        );
-    }
-}

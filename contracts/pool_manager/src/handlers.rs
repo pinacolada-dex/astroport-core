@@ -9,23 +9,432 @@ use cw20::Cw20ExecuteMsg;
 
 use crate::error::ContractError;
 use crate::state::CONFIG;
+use crate::msg::SwapOperation;
 
-#[cw_serde]
-pub enum SwapOperation {
-    /// Native swap
-    NativeSwap {
-        /// The name (denomination) of the native asset to swap from
-        offer_denom: String,
-        /// The name (denomination) of the native asset to swap to
-        ask_denom: String,
-    },
-    /// ASTRO swap
-    AstroSwap {
-        /// Information about the asset being swapped
-        offer_asset_info: AssetInfo,
-        /// Information about the asset we swap to
-        ask_asset_info: AssetInfo,
-    },
+/// Returns the end result of a simulation for one or multiple swap
+/// operations using a [`SimulateSwapOperationsResponse`] object.
+///
+/// * **offer_amount** amount of offer assets being swapped.
+///
+/// * **operations** is a vector that contains objects of type [`SwapOperation`].
+/// These are all the swap operations for which we perform a simulation.
+fn simulate_swap_operations(
+    deps: Deps,
+    offer_amount: Uint128,
+    operations: Vec<SwapOperation>,
+) -> Result<SimulateSwapOperationsResponse, ContractError> {
+    assert_operations(deps.api, &operations)?;
+
+    let config = CONFIG.load(deps.storage)?;
+    let astroport_factory = config.astroport_factory;
+    let mut return_amount = offer_amount;
+
+    for operation in operations.into_iter() {
+        match operation {
+            SwapOperation::AstroSwap {
+                offer_asset_info,
+                ask_asset_info,
+            } => {
+                let pair_info = query_pair_info(
+                    &deps.querier,
+                    astroport_factory.clone(),
+                    &[offer_asset_info.clone(), ask_asset_info.clone()],
+                )?;
+
+                let res: SimulationResponse = deps.querier.query_wasm_smart(
+                    pair_info.contract_addr,
+                    &PairQueryMsg::Simulation {
+                        offer_asset: Asset {
+                            info: offer_asset_info.clone(),
+                            amount: return_amount,
+                        },
+                        ask_asset_info: Some(ask_asset_info.clone()),
+                    },
+                )?;
+
+                return_amount = res.return_amount;
+            }
+            SwapOperation::NativeSwap { .. } => {
+                return Err(ContractError::NativeSwapNotSupported {})
+            }
+        }
+    }
+
+    Ok(SimulateSwapOperationsResponse {``
+        amount: return_amount,
+    })
+}
+
+/// Validates swap operations.
+///
+/// * **operations** is a vector that contains objects of type [`SwapOperation`]. These are all the swap operations we check.
+fn assert_operations(api: &dyn Api, operations: &[SwapOperation]) -> Result<(), ContractError> {
+    let operations_len = operations.len();
+    if operations_len == 0 {
+        return Err(ContractError::MustProvideOperations {});
+    }
+
+    if operations_len > MAX_SWAP_OPERATIONS {
+        return Err(ContractError::SwapLimitExceeded {});
+    }
+
+    let mut prev_ask_asset: Option<AssetInfo> = None;
+
+    for operation in operations {
+        let (offer_asset, ask_asset) = match operation {
+            SwapOperation::AstroSwap {
+                offer_asset_info,
+                ask_asset_info,
+            } => (offer_asset_info.clone(), ask_asset_info.clone()),
+            SwapOperation::NativeSwap { .. } => {
+                return Err(ContractError::NativeSwapNotSupported {})
+            }
+        };
+
+        offer_asset.check(api)?;
+        ask_asset.check(api)?;
+
+        if offer_asset.equal(&ask_asset) {
+            return Err(ContractError::DoublingAssetsPath {
+                offer_asset: offer_asset.to_string(),
+                ask_asset: ask_asset.to_string(),
+            });
+        }
+
+        if let Some(prev_ask_asset) = prev_ask_asset {
+            if prev_ask_asset != offer_asset {
+                return Err(ContractError::InvalidPathOperations {
+                    prev_ask_asset: prev_ask_asset.to_string(),
+                    next_offer_asset: offer_asset.to_string(),
+                    next_ask_asset: ask_asset.to_string(),
+                });
+            }
+        }
+
+        prev_ask_asset = Some(ask_asset);
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_provide_liquidity( deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    mut assets: Vec<Asset>,
+    slippage_tolerance: Option<Decimal>,
+    auto_stake: Option<bool>,
+    receiver: Option<String>) -> Result<Response, ContractError> {
+        let mut config = CONFIG.load(deps.storage)?;
+
+    if !check_pair_registered(
+        deps.querier,
+        &config.factory_addr,
+        &config.pair_info.asset_infos,
+    )? {
+        return Err(ContractError::PairIsNotRegistered {});
+    }
+
+    match assets.len() {
+        0 => {
+            return Err(StdError::generic_err("Nothing to provide").into());
+        }
+        1 => {
+            // Append omitted asset with explicit zero amount
+            let (given_ind, _) = config
+                .pair_info
+                .asset_infos
+                .iter()
+                .find_position(|pool| pool.equal(&assets[0].info))
+                .ok_or_else(|| ContractError::InvalidAsset(assets[0].info.to_string()))?;
+            assets.push(Asset {
+                info: config.pair_info.asset_infos[1 ^ given_ind].clone(),
+                amount: Uint128::zero(),
+            });
+        }
+        2 => {}
+        _ => {
+            return Err(ContractError::InvalidNumberOfAssets(
+                config.pair_info.asset_infos.len(),
+            ))
+        }
+    }
+
+    check_assets(deps.api, &assets)?;
+
+    info.funds
+        .assert_coins_properly_sent(&assets, &config.pair_info.asset_infos)?;
+
+    let precisions = Precisions::new(deps.storage)?;
+    let mut pools = query_pools(deps.querier, &env.contract.address, &config, &precisions)?;
+
+    if pools[0].info.equal(&assets[1].info) {
+        assets.swap(0, 1);
+    }
+
+    // precisions.get_precision() also validates that the asset belongs to the pool
+    let deposits = [
+        Decimal256::with_precision(assets[0].amount, precisions.get_precision(&assets[0].info)?)?,
+        Decimal256::with_precision(assets[1].amount, precisions.get_precision(&assets[1].info)?)?,
+    ];
+
+    let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
+        .to_decimal256(LP_TOKEN_PRECISION)?;
+
+    // Initial provide can not be one-sided
+    if total_share.is_zero() && (deposits[0].is_zero() || deposits[1].is_zero()) {
+        return Err(ContractError::InvalidZeroAmount {});
+    }
+
+    let mut messages = vec![];
+    for (i, pool) in pools.iter_mut().enumerate() {
+        // If the asset is a token contract, then we need to execute a TransferFrom msg to receive assets
+        match &pool.info {
+            AssetInfo::Token { contract_addr } => {
+                if !deposits[i].is_zero() {
+                    messages.push(CosmosMsg::Wasm(wasm_execute(
+                        contract_addr,
+                        &Cw20ExecuteMsg::TransferFrom {
+                            owner: info.sender.to_string(),
+                            recipient: env.contract.address.to_string(),
+                            amount: deposits[i]
+                                .to_uint(precisions.get_precision(&assets[i].info)?)?,
+                        },
+                        vec![],
+                    )?))
+                }
+            }
+            AssetInfo::NativeToken { .. } => {
+                // If the asset is native token, the pool balance is already increased
+                // To calculate the total amount of deposits properly, we should subtract the user deposit from the pool
+                pool.amount = pool.amount.checked_sub(deposits[i])?;
+            }
+        }
+    }
+
+    let mut new_xp = pools
+        .iter()
+        .enumerate()
+        .map(|(ind, pool)| pool.amount + deposits[ind])
+        .collect_vec();
+    new_xp[1] *= config.pool_state.price_state.price_scale;
+
+    let amp_gamma = config.pool_state.get_amp_gamma(&env);
+    let new_d = calc_d(&new_xp, &amp_gamma)?;
+
+    let share = if total_share.is_zero() {
+        let xcp = get_xcp(new_d, config.pool_state.price_state.price_scale);
+        let mint_amount = xcp
+            .checked_sub(MINIMUM_LIQUIDITY_AMOUNT.to_decimal256(LP_TOKEN_PRECISION)?)
+            .map_err(|_| ContractError::MinimumLiquidityAmountError {})?;
+
+        messages.extend(mint_liquidity_token_message(
+            deps.querier,
+            &config,
+            &env.contract.address,
+            &env.contract.address,
+            MINIMUM_LIQUIDITY_AMOUNT,
+            false,
+        )?);
+
+        // share cannot become zero after minimum liquidity subtraction
+        if mint_amount.is_zero() {
+            return Err(ContractError::MinimumLiquidityAmountError {});
+        }
+
+        config.pool_state.price_state.xcp_profit_real = Decimal256::one();
+        config.pool_state.price_state.xcp_profit = Decimal256::one();
+
+        mint_amount
+    } else {
+        let mut old_xp = pools.iter().map(|a| a.amount).collect_vec();
+        old_xp[1] *= config.pool_state.price_state.price_scale;
+        let old_d = calc_d(&old_xp, &amp_gamma)?;
+        let share = (total_share * new_d / old_d).saturating_sub(total_share);
+
+        let mut ideposits = deposits;
+        ideposits[1] *= config.pool_state.price_state.price_scale;
+
+        share * (Decimal256::one() - calc_provide_fee(&ideposits, &new_xp, &config.pool_params))
+    };
+
+    // calculate accrued share
+    let share_ratio = share / (total_share + share);
+    let balanced_share = vec![
+        new_xp[0] * share_ratio,
+        new_xp[1] * share_ratio / config.pool_state.price_state.price_scale,
+    ];
+    let assets_diff = vec![
+        deposits[0].diff(balanced_share[0]),
+        deposits[1].diff(balanced_share[1]),
+    ];
+
+    let mut slippage = Decimal256::zero();
+
+    // If deposit doesn't diverge too much from the balanced share, we don't update the price
+    if assets_diff[0] >= MIN_TRADE_SIZE && assets_diff[1] >= MIN_TRADE_SIZE {
+        slippage = assert_slippage_tolerance(
+            &deposits,
+            share,
+            &config.pool_state.price_state,
+            slippage_tolerance,
+        )?;
+
+        let last_price = assets_diff[0] / assets_diff[1];
+        config.pool_state.update_price(
+            &config.pool_params,
+            &env,
+            total_share + share,
+            &new_xp,
+            last_price,
+        )?;
+    }
+
+    let share_uint128 = share.to_uint(LP_TOKEN_PRECISION)?;
+
+    // Mint LP tokens for the sender or for the receiver (if set)
+    let receiver = addr_opt_validate(deps.api, &receiver)?.unwrap_or_else(|| info.sender.clone());
+    let auto_stake = auto_stake.unwrap_or(false);
+    messages.extend(mint_liquidity_token_message(
+        deps.querier,
+        &config,
+        &env.contract.address,
+        &receiver,
+        share_uint128,
+        auto_stake,
+    )?);
+
+    if config.track_asset_balances {
+        for (i, pool) in pools.iter().enumerate() {
+            BALANCES.save(
+                deps.storage,
+                &pool.info,
+                &pool
+                    .amount
+                    .checked_add(deposits[i])?
+                    .to_uint(precisions.get_precision(&pool.info)?)?,
+                env.block.height,
+            )?;
+        }
+    }
+
+    CONFIG.save(deps.storage, &config)?;
+
+    let attrs = vec![
+        attr("action", "provide_liquidity"),
+        attr("sender", info.sender),
+        attr("receiver", receiver),
+        attr("assets", format!("{}, {}", &assets[0], &assets[1])),
+        attr("share", share_uint128),
+        attr("slippage", slippage.to_string()),
+    ];
+
+    Ok(Response::new().add_messages(messages).add_attributes(attrs))
+
+}
+#[allow(clippy::too_many_arguments)]
+pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
+    if asset_infos.len() != 2 {
+        return Err(StdError::generic_err("asset_infos must contain exactly two elements").into());
+    }
+
+    check_asset_infos(deps.api, asset_infos)?;
+
+    let params: ConcentratedPoolParams = from_binary(
+        init_params
+            .ok_or(ContractError::InitParamsNotFound {})?,
+    )?;
+
+    if params.price_scale.is_zero() {
+        return Err(StdError::generic_err("Initial price scale can not be zero").into());
+    }
+
+    
+
+   
+
+    let mut pool_params = PoolParams::default();
+    pool_params.update_params(UpdatePoolParams {
+        mid_fee: Some(params.mid_fee),
+        out_fee: Some(params.out_fee),
+        fee_gamma: Some(params.fee_gamma),
+        repeg_profit_threshold: Some(params.repeg_profit_threshold),
+        min_price_scale_delta: Some(params.min_price_scale_delta),
+        ma_half_time: Some(params.ma_half_time),
+    })?;
+
+    let pool_state = PoolState {
+        initial: AmpGamma::default(),
+        future: AmpGamma::new(params.amp, params.gamma)?,
+        future_time: env.block.time.seconds(),
+        initial_time: 0,
+        price_state: PriceState {
+            oracle_price: params.price_scale.into(),
+            last_price: params.price_scale.into(),
+            price_scale: params.price_scale.into(),
+            last_price_update: env.block.time.seconds(),
+            xcp_profit: Decimal256::zero(),
+            xcp_profit_real: Decimal256::zero(),
+        },
+    };
+
+    let config = Config {
+        pair_info: PairInfo {
+            contract_addr: env.contract.address.clone(),
+            liquidity_token: Addr::unchecked(""),
+            asset_infos: msg.asset_infos.clone(),
+            pair_type: PairType::Custom("concentrated".to_string()),
+        },
+        factory_addr,
+        pool_params,
+        pool_state,
+        owner: None,
+        track_asset_balances: params.track_asset_balances.unwrap_or_default(),
+        fee_share: None,
+    };
+
+    if config.track_asset_balances {
+        for asset in &config.pair_info.asset_infos {
+            BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
+        }
+    }
+
+    CONFIG.save(deps.storage, &config)?;
+
+    BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
+
+    let token_name = format_lp_token_name(&msg.asset_infos, &deps.querier)?;
+
+    // Create LP token
+    let sub_msg = SubMsg::reply_on_success(
+        wasm_instantiate(
+            msg.token_code_id,
+            &TokenInstantiateMsg {
+                name: token_name,
+                symbol: "uLP".to_string(),
+                decimals: LP_TOKEN_PRECISION,
+                initial_balances: vec![],
+                mint: Some(MinterResponse {
+                    minter: env.contract.address.to_string(),
+                    cap: None,
+                }),
+                marketing: None,
+            },
+            vec![],
+            String::from("Astroport LP token"),
+        )?,
+        INSTANTIATE_TOKEN_REPLY_ID,
+    );
+
+    Ok(Response::new().add_submessage(sub_msg).add_attribute(
+        "asset_balances_tracking".to_owned(),
+        if config.track_asset_balances {
+            "enabled"
+        } else {
+            "disabled"
+        }
+        .to_owned(),
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

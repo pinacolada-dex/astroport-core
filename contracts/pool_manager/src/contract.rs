@@ -94,8 +94,9 @@ pub fn execute(
             max_spread,
             single,
         } => execute_swap_operation(deps, env, info, operation, to, max_spread, single),
-        ExecuteMsg::CreatePairMsg{}=>execute_create_pair(),
-        ExecuteMsg::ProvideLiquidity{}=>execute_provide_liquidity()
+        ExecuteMsg::CreatePairMsg{}=>execute_create_pair(deps, env, info,asset_infos,token_code_id,init_params),
+        
+        ExecuteMsg::ProvideLiquidity{}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver)
     }  
 }
 

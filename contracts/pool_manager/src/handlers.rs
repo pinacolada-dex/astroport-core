@@ -2,13 +2,21 @@ use astroport::asset::{Asset, AssetInfo};
 use astroport::pair::ExecuteMsg as PairExecuteMsg;
 use astroport::querier::{query_balance, query_pair_info, query_token_balance};
 use astroport::router::SwapOperation;
+use astroport::pair_concentrated::{
+    ConcentratedPoolParams, ConcentratedPoolUpdateParams, MigrateMsg, UpdatePoolParams,
+};
+use astroport_pcl_common::utils::{
+    assert_max_spread, assert_slippage_tolerance, before_swap_check, calc_provide_fee,
+    check_asset_infos, check_assets, check_cw20_in_pool, check_pair_registered, compute_swap,
+    get_share_in_assets, mint_liquidity_token_message,
+};
 use cosmwasm_std::{
-    to_binary, Coin, CosmosMsg, Decimal, DepsMut, Env, MessageInfo, Response, StdResult, WasmMsg,
+    to_binary, Coin, CosmosMsg, Decimal, DepsMut, Env, MessageInfo, Response, StdResult, WasmMsg,Api
 };
 use cw20::Cw20ExecuteMsg;
 
 use crate::error::ContractError;
-use crate::state::CONFIG;
+use crate::state::{POOLS,PAIR_BALANCES}
 use crate::msg::SwapOperation;
 
 /// Returns the end result of a simulation for one or multiple swap
@@ -25,7 +33,7 @@ fn simulate_swap_operations(
 ) -> Result<SimulateSwapOperationsResponse, ContractError> {
     assert_operations(deps.api, &operations)?;
 
-    let config = CONFIG.load(deps.storage)?;
+    let config = POOLS.load(deps.storage)?;
     let astroport_factory = config.astroport_factory;
     let mut return_amount = offer_amount;
 
@@ -125,7 +133,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     slippage_tolerance: Option<Decimal>,
     auto_stake: Option<bool>,
     receiver: Option<String>) -> Result<Response, ContractError> {
-        let mut config = CONFIG.load(deps.storage)?;
+        let mut config = POOLS.load(deps.storage)?;
 
     if !check_pair_registered(
         deps.querier,
@@ -318,7 +326,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
         }
     }
 
-    CONFIG.save(deps.storage, &config)?;
+    POOLS.save(deps.storage, &config)?;
 
     let attrs = vec![
         attr("action", "provide_liquidity"),
@@ -331,6 +339,16 @@ pub fn execute_provide_liquidity( deps: DepsMut,
 
     Ok(Response::new().add_messages(messages).add_attributes(attrs))
 
+}
+pub fn check_asset_infos(api: &dyn Api, asset_infos: &[AssetInfo]) -> Result<(), PclError> {
+    if !asset_infos.iter().all_unique() {
+        return Err(PclError::DoublingAssets {});
+    }
+
+    asset_infos
+        .iter()
+        .try_for_each(|asset_info| asset_info.check(api))
+        .map_err(Into::into)
 }
 #[allow(clippy::too_many_arguments)]
 pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
@@ -398,8 +416,8 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
             BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
         }
     }
-
-    CONFIG.save(deps.storage, &config)?;
+    let key = config.create_key();
+    POOLS.save(deps.storage, key, &config)?;
 
     BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
 
@@ -421,7 +439,7 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
                 marketing: None,
             },
             vec![],
-            String::from("Astroport LP token"),
+            String::from("Pina Colada LP token"),
         )?,
         INSTANTIATE_TOKEN_REPLY_ID,
     );
@@ -517,7 +535,7 @@ pub fn execute_swap_operation(
             offer_asset_info,
             ask_asset_info,
         } => {
-            let config = CONFIG.load(deps.storage)?;
+            let config = POOLS.load(deps.storage)?;
             let pair_info = query_pair_info(
                 &deps.querier,
                 config.astroport_factory,
@@ -567,6 +585,7 @@ fn swap(
     deps: DepsMut,
     env: Env,
     sender: Addr,
+    pool_key:String,
     offer_asset: Asset,
     belief_price: Option<Decimal>,
     max_spread: Option<Decimal>,
@@ -575,9 +594,9 @@ fn swap(
     let precisions = Precisions::new(deps.storage)?;
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
-    let mut config = CONFIG.load(deps.storage)?;
+    let mut config = POOLS.load(deps.storage,pool_key)?;
 
-    let mut pools = query_pools(deps.querier, &env.contract.address, &config, &precisions)?;
+    //let mut pools = query_pools(deps.querier, &env.contract.address, &config, &precisions)?;
 
     let (offer_ind, _) = pools
         .iter()
@@ -690,7 +709,7 @@ fn swap(
         PrecommitObservation::save(deps.storage, &env, base_amount, quote_amount)?;
     }
     
-    CONFIG.save(deps.storage, &config)?;
+    POOLS.save(deps.storage,&config.create_key() &config)?;
 
     if config.track_asset_balances {
         BALANCES.save(

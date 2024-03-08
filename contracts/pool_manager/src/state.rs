@@ -8,7 +8,7 @@ use astroport_circular_buffer::CircularBuffer;
 use astroport_pcl_common::state::Config;
 
 /// Stores pool parameters and state.
-pub const POOLS:Map<String,Config> = Map:new("pools");
+
 
 /// Stores the latest contract ownership transfer proposal
 /**
@@ -42,9 +42,33 @@ pub const POOLS:Map<String,Config> = Map:new("pools");
         track_asset_balances: params.track_asset_balances.unwrap_or_default(),
         fee_share: None,
     };
- */
+    
+    ASSET TYPES
+    #[derive(Hash, Eq)]
+    pub enum AssetInfo {
+        /// Non-native Token
+        Token { contract_addr: Addr },
+        /// Native token
+        NativeToken { denom: String },
+    }
+   
+    #[cw_serde]
+    pub struct Asset {
+        /// Information about an asset stored in a [`AssetInfo`] struct
+        pub info: AssetInfo,
+        /// A token amount
+        pub amount: Uint128,
+    }
 
-pub const PAIR_BALANCES:Map<String,Vec<DecimalAsset>> = Map:new("pair_balances");
+    /// This struct describes a Terra asset as decimal.
+    #[cw_serde]
+    pub struct DecimalAsset {
+        pub info: AssetInfo,
+        pub amount: Decimal256,
+    }
+ */
+pub const POOLS:Map<String,Config> = Map:new("pools");
+pub const PAIR_BALANCES:Map<String,Vec<Asset>> = Map:new("pair_balances");
 /// Stores asset balances to query them later at any block height
 pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances",
@@ -52,7 +76,24 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances_change",
     cw_storage_plus::Strategy::EveryBlock,
 );
+pub fn generate_key_from_assets(assets:Vec<Asset>)-> String{
+    format!("{}{}",assets[0].asset_info,assets[1].asset_info)
+}
+pub fn increment_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
+    let curr=PAIR_BALANCES.load(deps.storage,key);
+    for i in amounts.len(){
+        curr[i].amount=+amounts[i];
+    }
+    PAIR_BALANCES.save(deps.storeage,key,curr);
+}
 
+pub fn decrease_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
+    let curr=PAIR_BALANCES.load(deps.storage,key);
+    for i in amounts.len(){
+        curr[i].amount=-amounts[i];
+    }
+    PAIR_BALANCES.save(deps.storeage,key,curr);
+}
 
 impl Config{
     //Create key by ordering the pair token Addresses Alphabetically then concatenating
@@ -62,3 +103,43 @@ impl Config{
     }
 }
 
+pub struct Precisions(Vec<(String, u8)>);
+
+impl<'a> Precisions {
+    /// Stores map of AssetInfo (as String) -> precision
+    const PRECISIONS: Map<'a, String, u8> = Map::new("precisions");
+    pub fn new(storage: &dyn Storage) -> StdResult<Self> {
+        let items = Self::PRECISIONS
+            .range(storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?;
+
+        Ok(Self(items))
+    }
+
+    /// Store all token precisions
+    pub fn store_precisions<C: CustomQuery>(
+        deps: DepsMut<C>,
+        asset_infos: &[AssetInfo],
+        factory_addr: &Addr,
+    ) -> StdResult<()> {
+        for asset_info in asset_infos {
+            let precision = asset_info.decimals(&deps.querier, factory_addr)?;
+            Self::PRECISIONS.save(deps.storage, asset_info.to_string(), &precision)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_precision(&self, asset_info: &AssetInfo) -> Result<u8, PclError> {
+        self.0
+            .iter()
+            .find_map(|(info, prec)| {
+                if info == &asset_info.to_string() {
+                    Some(*prec)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| PclError::InvalidAsset(asset_info.to_string()))
+    }
+}

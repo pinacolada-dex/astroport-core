@@ -754,7 +754,7 @@ fn withdraw_liquidity(
     }
 
     let precisions = Precisions::new(deps.storage)?;
-    let pools = query_pools(
+    let pools: Vec<astroport::asset::DecimalAsset> = query_pools(
         deps.querier,
         &config.pair_info.contract_addr,
         &config,

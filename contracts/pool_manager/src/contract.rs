@@ -16,7 +16,7 @@ use astroport::router::{
 use crate::error::ContractError;
 use crate::handlers::execute_swap_operations;
 use crate::operations::execute_swap_operation;
-use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA};
+use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA,PAIR_BALANCES};
 use crate::msg::ExecuteMsg;
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
@@ -93,10 +93,12 @@ pub fn execute(
             to,
             max_spread,
             single,
-        } => execute_swap_operation(deps, env, info, operation, to, max_spread, single),
-        ExecuteMsg::CreatePairMsg{}=>execute_create_pair(deps, env, info,asset_infos,token_code_id,init_params),
+        } => execute_swap_operation(deps, env, info, operation, to, max_spread, single),        
+         
+        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,asset_infos,token_code_id,init_params),
         
-        ExecuteMsg::ProvideLiquidity{}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver)
+        ExecuteMsg::ProvideLiquidity{assets_infos,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,asset_infos,slippage_tolerance,auto_stake,receiver),
+        //ExecuteMsg::WithdrawLiquidity()=execute_withdraw_liquidity()
     }  
 }
 
@@ -184,7 +186,7 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
     let contract_version = get_contract_version(deps.storage)?;
 
     match contract_version.contract.as_ref() {
-        "astroport-router" => match contract_version.version.as_ref() {
+        "router" => match contract_version.version.as_ref() {
             "1.1.1" => {}
             _ => return Err(ContractError::MigrationError {}),
         },

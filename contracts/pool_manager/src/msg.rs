@@ -71,6 +71,10 @@ pub enum ExecuteMsg {
         /// The receiver of LP tokens
         receiver: Option<String>,
     },
+    WithdrawLiquidity{
+        assets: Vec<Asset>,
+        minimum_receive: Option<Uint128>,
+    },
     CreatePairMsg {
         /// Information about assets in the pool
         asset_infos: Vec<AssetInfo>,

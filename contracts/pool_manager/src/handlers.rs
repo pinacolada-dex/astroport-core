@@ -1,13 +1,14 @@
 use astroport::asset::{Asset, AssetInfo};
 use astroport::pair::ExecuteMsg as PairExecuteMsg;
-use astroport::querier::{query_balance, query_pair_info, query_token_balance};
+use astroport::querier::{query_balance,query_supply, query_pair_info, query_token_balance};
+
 use astroport::router::SwapOperation;
 use astroport::pair_concentrated::{
     ConcentratedPoolParams, ConcentratedPoolUpdateParams, MigrateMsg, UpdatePoolParams,
 };
 use astroport_pcl_common::utils::{
     assert_max_spread, assert_slippage_tolerance, before_swap_check, calc_provide_fee,
-    check_asset_infos, check_assets, check_cw20_in_pool, check_pair_registered, compute_swap,
+    check_asset_infos, check_assets, check_cw20_in_pool,  compute_swap,
     get_share_in_assets, mint_liquidity_token_message,
 };
 use cosmwasm_std::{
@@ -32,47 +33,12 @@ fn simulate_swap_operations(
     operations: Vec<SwapOperation>,
 ) -> Result<SimulateSwapOperationsResponse, ContractError> {
     assert_operations(deps.api, &operations)?;
-
-    let config = POOLS.load(deps.storage)?;
-    let astroport_factory = config.astroport_factory;
-    let mut return_amount = offer_amount;
-
-    for operation in operations.into_iter() {
-        match operation {
-            SwapOperation::AstroSwap {
-                offer_asset_info,
-                ask_asset_info,
-            } => {
-                let pair_info = query_pair_info(
-                    &deps.querier,
-                    astroport_factory.clone(),
-                    &[offer_asset_info.clone(), ask_asset_info.clone()],
-                )?;
-
-                let res: SimulationResponse = deps.querier.query_wasm_smart(
-                    pair_info.contract_addr,
-                    &PairQueryMsg::Simulation {
-                        offer_asset: Asset {
-                            info: offer_asset_info.clone(),
-                            amount: return_amount,
-                        },
-                        ask_asset_info: Some(ask_asset_info.clone()),
-                    },
-                )?;
-
-                return_amount = res.return_amount;
-            }
-            SwapOperation::NativeSwap { .. } => {
-                return Err(ContractError::NativeSwapNotSupported {})
-            }
-        }
-    }
-
-    Ok(SimulateSwapOperationsResponse {``
-        amount: return_amount,
-    })
+ Ok()
+   
 }
-
+pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{
+    format!("{}{}",assets[0].asset_info,assets[1].asset_info)
+}
 /// Validates swap operations.
 ///
 /// * **operations** is a vector that contains objects of type [`SwapOperation`]. These are all the swap operations we check.
@@ -133,16 +99,10 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     slippage_tolerance: Option<Decimal>,
     auto_stake: Option<bool>,
     receiver: Option<String>) -> Result<Response, ContractError> {
-        let mut config = POOLS.load(deps.storage)?;
+    let pool=generate_key_from_assets(&assets);
+    let mut config = POOLS.load(deps.storage,pool)?;
 
-    if !check_pair_registered(
-        deps.querier,
-        &config.factory_addr,
-        &config.pair_info.asset_infos,
-    )? {
-        return Err(ContractError::PairIsNotRegistered {});
-    }
-
+   
     match assets.len() {
         0 => {
             return Err(StdError::generic_err("Nothing to provide").into());
@@ -174,7 +134,13 @@ pub fn execute_provide_liquidity( deps: DepsMut,
         .assert_coins_properly_sent(&assets, &config.pair_info.asset_infos)?;
 
     let precisions = Precisions::new(deps.storage)?;
-    let mut pools = query_pools(deps.querier, &env.contract.address, &config, &precisions)?;
+    /**
+     * deps:DepsMut,
+    querier: QuerierWrapper,    
+    config: &Config,
+    precisions: &Precisions,
+     */
+    let mut pools = query_pools(&deps,&config, &precisions)?;
 
     if pools[0].info.equal(&assets[1].info) {
         assets.swap(0, 1);
@@ -340,6 +306,105 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     Ok(Response::new().add_messages(messages).add_attributes(attrs))
 
 }
+fn withdraw_liquidity(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    sender: Addr,
+    amount: Uint128,
+    assets: Vec<Asset>,
+) -> Result<Response, ContractError> {
+    let pool=generate_key_from_assets(&assets);
+    let mut config = POOLS.load(deps.storage,pool)?;
+
+    if info.sender != config.pair_info.liquidity_token {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let precisions = Precisions::new(deps.storage)?;
+    let mut pools = query_pools(&deps,&config, &precisions)?;
+
+    let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?;
+    let mut messages = vec![];
+
+    let refund_assets = if assets.is_empty() {
+        // Usual withdraw (balanced)
+        get_share_in_assets(&pools, amount.saturating_sub(Uint128::one()), total_share)
+    } else {
+        return Err(StdError::generic_err("Imbalanced withdraw is currently disabled").into());
+    };
+
+    // decrease XCP
+    let mut xs = pools.iter().map(|a| a.amount).collect_vec();
+
+    xs[0] -= refund_assets[0].amount;
+    xs[1] -= refund_assets[1].amount;
+    xs[1] *= config.pool_state.price_state.price_scale;
+    let amp_gamma = config.pool_state.get_amp_gamma(&env);
+    let d = calc_d(&xs, &amp_gamma)?;
+    config.pool_state.price_state.xcp_profit_real =
+        get_xcp(d, config.pool_state.price_state.price_scale)
+            / (total_share - amount).to_decimal256(LP_TOKEN_PRECISION)?;
+
+    let refund_assets = refund_assets
+        .into_iter()
+        .map(|asset| {
+            let prec = precisions.get_precision(&asset.info).unwrap();
+
+            Ok(Asset {
+                info: asset.info,
+                amount: asset.amount.to_uint(prec)?,
+            })
+        })
+        .collect::<StdResult<Vec<_>>>()?;
+
+    messages.extend(
+        refund_assets
+            .iter()
+            .cloned()
+            .map(|asset| asset.into_msg(&sender))
+            .collect::<StdResult<Vec<_>>>()?,
+    );
+    messages.push(
+        wasm_execute(
+            &config.pair_info.liquidity_token,
+            &Cw20ExecuteMsg::Burn { amount },
+            vec![],
+        )?
+        .into(),
+    );
+
+    if config.track_asset_balances {
+        for (i, pool) in pools.iter().enumerate() {
+            BALANCES.save(
+                deps.storage,
+                &pool.info,
+                &pool
+                    .amount
+                    .to_uint(precisions.get_precision(&pool.info)?)?
+                    .checked_sub(refund_assets[i].amount)?,
+                env.block.height,
+            )?;
+        }
+    }
+
+    CONFIG.save(deps.storage, &config)?;
+
+    Ok(Response::new().add_messages(messages).add_attributes(vec![
+        attr("action", "withdraw_liquidity"),
+        attr("sender", sender),
+        attr("withdrawn_share", amount),
+        attr("refund_assets", refund_assets.iter().join(", ")),
+    ]))
+}
+/// Withdraw liquidity from the pool.
+///
+/// * **sender** address that will receive assets back from the pair contract
+///
+/// * **amount** amount of provided LP tokens
+///
+/// * **assets** defines number of coins a user wants to withdraw per each asset.
+
 pub fn check_asset_infos(api: &dyn Api, asset_infos: &[AssetInfo]) -> Result<(), PclError> {
     if !asset_infos.iter().all_unique() {
         return Err(PclError::DoublingAssets {});
@@ -410,7 +475,11 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
         track_asset_balances: params.track_asset_balances.unwrap_or_default(),
         fee_share: None,
     };
-
+    let balances=Vec::new();
+    for info in config.pair_info.asset_infos{
+        balances.push(Asset{info,amount:Uint128::zero()})
+    }
+    PAIR_BALANCES.save(deps.storage,key,balances);
     if config.track_asset_balances {
         for asset in &config.pair_info.asset_infos {
             BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
@@ -429,7 +498,7 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
             msg.token_code_id,
             &TokenInstantiateMsg {
                 name: token_name,
-                symbol: "uLP".to_string(),
+                symbol: "pcLP".to_string(),
                 decimals: LP_TOKEN_PRECISION,
                 initial_balances: vec![],
                 mint: Some(MinterResponse {
@@ -471,51 +540,30 @@ pub fn execute_swap_operations(
     let target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
     /// TODO Replace with internal handler
-    /*let messages = operations
-        .into_iter()
-        .enumerate()
-        .map(|(operation_index, op)| {
-            if operation_index == operations_len - 1 {
-                wasm_execute(
-                    env.contract.address.to_string(),
-                    &ExecuteMsg::ExecuteSwapOperation {
-                        operation: op,
-                        to: Some(to.to_string()),
-                        max_spread,
-                        single: operations_len == 1,
-                    },
-                    vec![],
-                )
-                .map(|inner_msg| SubMsg::reply_on_success(inner_msg, AFTER_SWAP_REPLY_ID))
-            } else {
-                wasm_execute(
-                    env.contract.address.to_string(),
-                    &ExecuteMsg::ExecuteSwapOperation {
-                        operation: op,
-                        to: None,
-                        max_spread,
-                        single: operations_len == 1,
-                    },
-                    vec![],
-                )
-                .map(SubMsg::new)
-            }
-        })
-        .collect::<StdResult<Vec<_>>>()?;
+    for operation in operations.into_iter() {
+        match operation {
+            SwapOperation::AstroSwap {
+                offer_asset_info,
+                ask_asset_info,
+            } => {
+                let pair_info = query_pair_info(
+                    &deps.querier,
+                    astroport_factory.clone(),
+                    &[offer_asset_info.clone(), ask_asset_info.clone()],
+                )?;
 
-    let prev_balance = target_asset_info.query_pool(&deps.querier, &to)?;
-    REPLY_DATA.save(
-        deps.storage,
-        &ReplyData {
-            asset_info: target_asset_info,
-            prev_balance,
-            minimum_receive,
-            receiver: to.to_string(),
-        },
-    )?;
-    **/
+               // Handle internal swap here
+
+                return_amount = res.return_amount;
+            }
+            SwapOperation::NativeSwap { .. } => {
+                return Err(ContractError::NativeSwapNotSupported {})
+            }
+        }
+    }
     Ok(Response::new().add_submessages(messages))
 }
+
 
 pub fn execute_swap_operation(
     deps: DepsMut,
@@ -530,44 +578,9 @@ pub fn execute_swap_operation(
         return Err(ContractError::Unauthorized {});
     }
 
-    let message = match operation {
-        SwapOperation::AstroSwap {
-            offer_asset_info,
-            ask_asset_info,
-        } => {
-            let config = POOLS.load(deps.storage)?;
-            let pair_info = query_pair_info(
-                &deps.querier,
-                config.astroport_factory,
-                &[offer_asset_info.clone(), ask_asset_info.clone()],
-            )?;
+   
 
-            let amount = match &offer_asset_info {
-                AssetInfo::NativeToken { denom } => {
-                    query_balance(&deps.querier, env.contract.address, denom)?
-                }
-                AssetInfo::Token { contract_addr } => {
-                    query_token_balance(&deps.querier, contract_addr, env.contract.address)?
-                }
-            };
-            let offer_asset = Asset {
-                info: offer_asset_info,
-                amount,
-            };
-
-            asset_into_swap_msg(
-                pair_info.contract_addr.to_string(),
-                offer_asset,
-                ask_asset_info,
-                max_spread,
-                to,
-                single,
-            )?
-        }
-        SwapOperation::NativeSwap { .. } => return Err(ContractError::NativeSwapNotSupported {}),
-    };
-
-    Ok(Response::new().add_message(message))
+    Ok(Response::new())
 }
 /// Performs an swap operation with the specified parameters. The trader must approve the
 /// pool contract to transfer offer assets from their wallet.
@@ -595,8 +608,8 @@ fn swap(
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
     let mut config = POOLS.load(deps.storage,pool_key)?;
+    let mut pools = query_pools(&deps,&config, &precisions)?;
 
-    //let mut pools = query_pools(deps.querier, &env.contract.address, &config, &precisions)?;
 
     let (offer_ind, _) = pools
         .iter()

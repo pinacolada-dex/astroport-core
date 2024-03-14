@@ -1977,6 +1977,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "pool-manager"
+version = "1.0.2"
+dependencies = [
+ "anyhow",
+ "astroport 3.8.0",
+ "astroport-pair",
+ "astroport-token",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cw-multi-test 0.15.1",
+ "cw-storage-plus 0.15.1",
+ "cw-utils 1.0.1",
+ "cw2 0.15.1",
+ "cw20 0.15.1",
+ "itertools 0.10.5",
+ "prost 0.11.9",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

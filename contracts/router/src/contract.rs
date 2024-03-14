@@ -147,7 +147,7 @@ pub fn execute_swap_operations(
     let target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
 
-    let messages = opeoffer_assetrations
+    let messages = operations
         .into_iter()
         .enumerate()
         .map(|(operation_index, op)| {

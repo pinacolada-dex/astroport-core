@@ -539,50 +539,56 @@ pub fn execute_swap_operations(
     let to = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
     let target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
+    let messages=Vec::new();
+    messages.push(CosmosMsg::Wasm(wasm_execute(
+        operations[0].offer_asset,
+        &Cw20ExecuteMsg::TransferFrom {
+            owner: info.sender.to_string(),
+            recipient: env.contract.address.to_string(),
+            amount:operations[0].offer_asset.contract_addr.to_string()
+        },.
+        vec![],
+    )?))
     /// TODO Replace with internal handler
-    for operation in operations.into_iter() {
-        match operation {
-            SwapOperation::AstroSwap {
-                offer_asset_info,
-                ask_asset_info,
-            } => {
-                let pair_info = query_pair_info(
-                    &deps.querier,
-                    astroport_factory.clone(),
-                    &[offer_asset_info.clone(), ask_asset_info.clone()],
-                )?;
-
-               // Handle internal swap here
-
-                return_amount = res.return_amount;
-            }
-            SwapOperation::NativeSwap { .. } => {
-                return Err(ContractError::NativeSwapNotSupported {})
+    for operation in operations.into_iter().enumerate()  {
+        // check if
+        if operation.0 == operations_len - 1 {
+            let result=swap_internal(deps,pool_key,offer_asset,belief_price,max_spread);
+    
+            return_amount = result.unwrap()
+            messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: operation.offer_asset.contract_addr.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient,
+                    amount: return_amount
+                })?,
+                funds: vec![],
+            }))
+        }else{
+            match operation.1 {
+                SwapOperation::AstroSwap {
+                    offer_asset_info,
+                    ask_asset_info,
+                } => {
+                    
+    
+                let result=swap_internal(deps,pool_key,offer_asset,belief_price,max_spread);
+    
+                return_amount = result.unwrap()
+                }
+                SwapOperation::NativeSwap { .. } => {
+                    return Err(ContractError::NativeSwapNotSupported {})
+                }
             }
         }
+        
     }
     Ok(Response::new().add_submessages(messages))
 }
 
 
-pub fn execute_swap_operation(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    operation: SwapOperation,
-    to: Option<String>,
-    max_spread: Option<Decimal>,
-    single: bool,
-) -> Result<Response, ContractError> {
-    if env.contract.address != info.sender {
-        return Err(ContractError::Unauthorized {});
-    }
 
-   
-
-    Ok(Response::new())
-}
-/// Performs an swap operation with the specified parameters. The trader must approve the
+/// Updates internal pools and calculated swap outputs The trader must approve the
 /// pool contract to transfer offer assets from their wallet.
 ///
 /// * **sender** is the sender of the swap operation.
@@ -594,16 +600,13 @@ pub fn execute_swap_operation(
 /// * **max_spread** sets the maximum spread of the swap operation.
 ///
 /// * **to** sets the recipient of the swap operation.
-fn swap(
+fn swap_internal(
     deps: DepsMut,
-    env: Env,
-    sender: Addr,
     pool_key:String,
     offer_asset: Asset,
     belief_price: Option<Decimal>,
-    max_spread: Option<Decimal>,
-    to: Option<Addr>,
-) -> Result<Response, ContractError> {
+    max_spread: Option<Decimal>,    
+) -> Result<Uint128, ContractError> {
     let precisions = Precisions::new(deps.storage)?;
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
@@ -623,22 +626,7 @@ fn swap(
     before_swap_check(&pools, offer_asset_dec.amount)?;
 
     let mut xs = pools.iter().map(|asset| asset.amount).collect_vec();
-
-    // Get fee info from the factory
-    let fee_info = query_fee_info(
-        &deps.querier,
-        &config.factory_addr,
-        config.pair_info.pair_type.clone(),
-    )?;
-    let mut maker_fee_share = Decimal256::zero();
-    if fee_info.fee_address.is_some() {
-        maker_fee_share = fee_info.maker_fee_rate.into();
-    }
-    // If this pool is configured to share fees
-    let mut share_fee_share = Decimal256::zero();
-    if let Some(fee_share) = config.fee_share.clone() {
-        share_fee_share = Decimal256::from_ratio(fee_share.bps, 10000u16);
-    }
+  
 
     let swap_result = compute_swap(
         &xs,
@@ -679,7 +667,7 @@ fn swap(
             .update_price(&config.pool_params, &env, total_share, &xs, last_price)?;
     }
 
-    let receiver = to.unwrap_or_else(|| sender.clone());
+    /**let receiver = to.unwrap_or_else(|| sender.clone());
 
     let mut messages = vec![Asset {
         info: pools[ask_ind].info.clone(),
@@ -706,7 +694,7 @@ fn swap(
             messages.push(fee.into_msg(fee_address)?);
         }
     }
-
+    **/
     // Store observation from precommit data
     accumulate_swap_sizes(deps.storage, &env)?;
 
@@ -741,4 +729,5 @@ fn swap(
             env.block.height,
         )?;
     }
+    Ok(return_amount)
 }

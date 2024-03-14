@@ -14,8 +14,8 @@ use astroport::router::{
 };
 
 use crate::error::ContractError;
-use crate::handlers::execute_swap_operations;
-use crate::operations::execute_swap_operation;
+use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
+
 use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA,PAIR_BALANCES};
 use crate::msg::ExecuteMsg;
 /// Contract name that is used for migration.
@@ -88,17 +88,12 @@ pub fn execute(
             to,
             max_spread,
         ),
-        ExecuteMsg::ExecuteSwapOperation {
-            operation,
-            to,
-            max_spread,
-            single,
-        } => execute_swap_operation(deps, env, info, operation, to, max_spread, single),        
+            
          
         ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,asset_infos,token_code_id,init_params),
         
         ExecuteMsg::ProvideLiquidity{assets_infos,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,asset_infos,slippage_tolerance,auto_stake,receiver),
-        //ExecuteMsg::WithdrawLiquidity()=execute_withdraw_liquidity()
+        ExecuteMsg::WithdrawLiquidity(assets,minimum_receive)=execute_withdraw_liquidity(deps,env,info,assets,minimum_receive)
     }  
 }
 

@@ -3,21 +3,24 @@ use cosmwasm_std::{
     Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsg, SubMsgResult, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
-use cw20::Cw20ReceiveMsg;
+
 
 use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
 use astroport::pair::{QueryMsg as PairQueryMsg, SimulationResponse};
 use astroport::querier::query_pair_info;
 use astroport::router::{
-    ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
+    ConfigResponse, Cw20HookMsg,InstantiateMsg, MigrateMsg, QueryMsg,
     SimulateSwapOperationsResponse, SwapOperation, SwapResponseData, MAX_SWAP_OPERATIONS,
 };
-
+use crate::msg::ExecuteMsg;
 use crate::error::ContractError;
 use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
+use astroport_pcl_common::state::{
+    AmpGamma, Config, PoolParams, PoolState, Precisions, PriceState,
+};
+use crate::query::simulate_swap_operations;
+use crate::state::{ PAIR_BALANCES};
 
-use crate::state::{Config, ReplyData, CONFIG, REPLY_DATA,PAIR_BALANCES};
-use crate::msg::ExecuteMsg;
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
 /// Contract version that is used for migration.
@@ -35,12 +38,7 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    CONFIG.save(
-        deps.storage,
-        &Config {
-            astroport_factory: deps.api.addr_validate(&msg.astroport_factory)?,
-        },
-    )?;
+
 
     Ok(Response::default())
 }
@@ -87,60 +85,45 @@ pub fn execute(
             minimum_receive,
             to,
             max_spread,
-        ),
-            
+        ),         
          
-        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,asset_infos,token_code_id,init_params),
+        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
         
-        ExecuteMsg::ProvideLiquidity{assets_infos,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,asset_infos,slippage_tolerance,auto_stake,receiver),
-        ExecuteMsg::WithdrawLiquidity(assets,minimum_receive)=execute_withdraw_liquidity(deps,env,info,assets,minimum_receive)
+        ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
+        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(deps,env,info,info.sender,amount,assets),
     }  
 }
 
 
-/// Performs swap operations with the specified parameters.
-///
-/// * **sender** address that swaps tokens.
-///
-/// * **operations** all swap operations to perform.
-///
-/// * **minimum_receive** used to guarantee that the ask amount is above a minimum amount.
-///
-/// * **to** recipient of the ask tokens.
 
-
-#[cfg_attr(not(feature = "library"), entry_point)]
+/**#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
     match msg {
         Reply {
-            id: AFTER_SWAP_REPLY_ID,
-            result: SubMsgResult::Ok(..),
+            id: INSTANTIATE_TOKEN_REPLY_ID,
+            result:
+                SubMsgResult::Ok(SubMsgResponse {
+                    data: Some(data), ..
+                }),
         } => {
-            let reply_data = REPLY_DATA.load(deps.storage)?;
-            let receiver_balance = reply_data
-                .asset_info
-                .query_pool(&deps.querier, reply_data.receiver)?;
-            let swap_amount = receiver_balance.checked_sub(reply_data.prev_balance)?;
+            let mut config = CONFIG.load(deps.storage)?;
 
-            if let Some(minimum_receive) = reply_data.minimum_receive {
-                if swap_amount < minimum_receive {
-                    return Err(ContractError::AssertionMinimumReceive {
-                        receive: minimum_receive,
-                        amount: swap_amount,
-                    });
-                }
+            if config.pair_info.liquidity_token != Addr::unchecked("") {
+                return Err(ContractError::Unauthorized {});
             }
 
-            // Reply data makes sense ONLY if the first token in multi-hop swap is native.
-            let data = to_binary(&SwapResponseData {
-                return_amount: swap_amount,
-            })?;
-
-            Ok(Response::new().set_data(data))
+            let init_response = parse_instantiate_response_data(data.as_slice())
+                .map_err(|e| StdError::generic_err(format!("{e}")))?;
+            config.pair_info.liquidity_token =
+                deps.api.addr_validate(&init_response.contract_address)?;
+            CONFIG.save(deps.storage, &config)?;
+            Ok(Response::new()
+                .add_attribute("liquidity_token_addr", config.pair_info.liquidity_token))
         }
-        _ => Err(StdError::generic_err("Failed to process reply").into()),
+        _ => Err(ContractError::FailedToParseReply {}),
     }
 }
+**/
 
 /// Exposes all the queries available in the contract.
 /// ## Queries
@@ -152,7 +135,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
-        QueryMsg::Config {} => Ok(to_binary(&query_config(deps)?)?),
+       
         QueryMsg::SimulateSwapOperations {
             offer_amount,
             operations,
@@ -164,15 +147,6 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
     }
 }
 
-/// Returns general contract settings in a [`ConfigResponse`] object.
-pub fn query_config(deps: Deps) -> Result<ConfigResponse, ContractError> {
-    let state = CONFIG.load(deps.storage)?;
-    let resp = ConfigResponse {
-        astroport_factory: state.astroport_factory.into_string(),
-    };
-
-    Ok(resp)
-}
 
 /// Manages contract migration.
 #[cfg(not(tarpaulin_include))]

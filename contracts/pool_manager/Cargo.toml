@@ -32,8 +32,11 @@ library = []
 [dependencies]
 cosmwasm-std = "1.1"
 astroport = { path = "../../packages/astroport", version = "3" }
+astroport-pcl-common = { path = "../../packages/astroport_pcl_common"}
+astroport-circular-buffer = { path = "../../packages/circular_buffer"}
 cw-storage-plus = "0.15"
 cw2 = "0.15"
+cw20 = "0.15"
 thiserror = "1.0"
 protobuf = { version = "2", features = ["with-bytes"] }
 itertools = "0.10"

@@ -1,25 +1,35 @@
-use astroport::asset::{Asset, AssetInfo};
-use astroport::pair::ExecuteMsg as PairExecuteMsg;
+use astroport::asset::{addr_opt_validate, format_lp_token_name, Asset, AssetInfo, CoinsExt, Decimal256Ext, PairInfo, MINIMUM_LIQUIDITY_AMOUNT};
+use astroport::cosmwasm_ext::{AbsDiff as _, DecimalToInteger, IntegerToDecimal};
+use astroport::factory::PairType;
+use astroport::observation::PrecommitObservation;
+use astroport::pair::{ExecuteMsg as PairExecuteMsg, MIN_TRADE_SIZE};
 use astroport::querier::{query_balance,query_supply, query_pair_info, query_token_balance};
-
+use astroport::token::InstantiateMsg as TokenInstantiateMsg;
 use astroport::router::SwapOperation;
 use astroport::pair_concentrated::{
     ConcentratedPoolParams, ConcentratedPoolUpdateParams, MigrateMsg, UpdatePoolParams,
 };
+use astroport_circular_buffer::BufferManager;
+use astroport_pcl_common::{calc_d, get_xcp};
+use astroport_pcl_common::state::{AmpGamma, PoolParams,Config, PoolState, Precisions, PriceState};
 use astroport_pcl_common::utils::{
     assert_max_spread, assert_slippage_tolerance, before_swap_check, calc_provide_fee,
     check_asset_infos, check_assets, check_cw20_in_pool,  compute_swap,
     get_share_in_assets, mint_liquidity_token_message,
 };
+use cosmwasm_schema::schemars::gen;
 use cosmwasm_std::{
-    to_binary, Coin, CosmosMsg, Decimal, DepsMut, Env, MessageInfo, Response, StdResult, WasmMsg,Api
+    attr, from_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, Coin, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
 };
-use cw20::Cw20ExecuteMsg;
-
+use itertools::Itertools;
+use cw20::{Cw20ExecuteMsg, MinterResponse};
+use crate::utils::query_pools;
 use crate::error::ContractError;
-use crate::state::{POOLS,PAIR_BALANCES}
-use crate::msg::SwapOperation;
-
+use crate::state::{pair_key, BALANCES, PAIR_BALANCES, POOLS};
+pub(crate) const LP_TOKEN_PRECISION: u8 = 6;
+const MAX_SWAP_OPERATIONS:usize=10;
+const DUMMY_ADDRESS:Addr= Addr::unchecked("PINA_COLADA");
+const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 /// Returns the end result of a simulation for one or multiple swap
 /// operations using a [`SimulateSwapOperationsResponse`] object.
 ///
@@ -27,17 +37,9 @@ use crate::msg::SwapOperation;
 ///
 /// * **operations** is a vector that contains objects of type [`SwapOperation`].
 /// These are all the swap operations for which we perform a simulation.
-fn simulate_swap_operations(
-    deps: Deps,
-    offer_amount: Uint128,
-    operations: Vec<SwapOperation>,
-) -> Result<SimulateSwapOperationsResponse, ContractError> {
-    assert_operations(deps.api, &operations)?;
- Ok()
-   
-}
-pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{
-    format!("{}{}",assets[0].asset_info,assets[1].asset_info)
+
+pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{    
+    format!("{:?}", &pair_key(&[assets[0].info,assets[1].info]))
 }
 /// Validates swap operations.
 ///
@@ -99,8 +101,8 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     slippage_tolerance: Option<Decimal>,
     auto_stake: Option<bool>,
     receiver: Option<String>) -> Result<Response, ContractError> {
-    let pool=generate_key_from_assets(&assets);
-    let mut config = POOLS.load(deps.storage,pool)?;
+    let pool_key=generate_key_from_assets(&assets);
+    let mut config = POOLS.load(deps.storage,pool_key)?;
 
    
     match assets.len() {
@@ -292,7 +294,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
         }
     }
 
-    POOLS.save(deps.storage, &config)?;
+    POOLS.save(deps.storage,pool_key, &config)?;
 
     let attrs = vec![
         attr("action", "provide_liquidity"),
@@ -306,7 +308,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     Ok(Response::new().add_messages(messages).add_attributes(attrs))
 
 }
-fn withdraw_liquidity(
+pub fn execute_withdraw_liquidity(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -388,7 +390,7 @@ fn withdraw_liquidity(
         }
     }
 
-    CONFIG.save(deps.storage, &config)?;
+    //CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::new().add_messages(messages).add_attributes(vec![
         attr("action", "withdraw_liquidity"),
@@ -397,34 +399,17 @@ fn withdraw_liquidity(
         attr("refund_assets", refund_assets.iter().join(", ")),
     ]))
 }
-/// Withdraw liquidity from the pool.
-///
-/// * **sender** address that will receive assets back from the pair contract
-///
-/// * **amount** amount of provided LP tokens
-///
-/// * **assets** defines number of coins a user wants to withdraw per each asset.
 
-pub fn check_asset_infos(api: &dyn Api, asset_infos: &[AssetInfo]) -> Result<(), PclError> {
-    if !asset_infos.iter().all_unique() {
-        return Err(PclError::DoublingAssets {});
-    }
-
-    asset_infos
-        .iter()
-        .try_for_each(|asset_info| asset_info.check(api))
-        .map_err(Into::into)
-}
 #[allow(clippy::too_many_arguments)]
-pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
+pub fn execute_create_pair(deps: DepsMut,env: Env, info: MessageInfo, init_params:Option<Binary>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
     if asset_infos.len() != 2 {
         return Err(StdError::generic_err("asset_infos must contain exactly two elements").into());
     }
 
-    check_asset_infos(deps.api, asset_infos)?;
+    check_asset_infos(deps.api, &asset_infos)?;
 
     let params: ConcentratedPoolParams = from_binary(
-        init_params
+        &init_params
             .ok_or(ContractError::InitParamsNotFound {})?,
     )?;
 
@@ -460,15 +445,15 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
             xcp_profit_real: Decimal256::zero(),
         },
     };
-
+   
     let config = Config {
         pair_info: PairInfo {
             contract_addr: env.contract.address.clone(),
             liquidity_token: Addr::unchecked(""),
-            asset_infos: msg.asset_infos.clone(),
+            asset_infos: asset_infos.clone(),
             pair_type: PairType::Custom("concentrated".to_string()),
         },
-        factory_addr,
+        factory_addr:DUMMY_ADDRESS,
         pool_params,
         pool_state,
         owner: None,
@@ -479,23 +464,23 @@ pub fn execute_create_pair(init_params:Vec<u8>,asset_infos:Vec<AssetInfo>) -> Re
     for info in config.pair_info.asset_infos{
         balances.push(Asset{info,amount:Uint128::zero()})
     }
-    PAIR_BALANCES.save(deps.storage,key,balances);
+  
     if config.track_asset_balances {
         for asset in &config.pair_info.asset_infos {
             BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
         }
     }
-    let key = config.create_key();
+    let key =  format!("{:?}", &pair_key(&[asset_infos[0],asset_infos[1]]));
     POOLS.save(deps.storage, key, &config)?;
+    PAIR_BALANCES.save(deps.storage,key,&balances);
+    //BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
 
-    BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
-
-    let token_name = format_lp_token_name(&msg.asset_infos, &deps.querier)?;
+    let token_name = format_lp_token_name(&asset_infos, &deps.querier)?;
 
     // Create LP token
     let sub_msg = SubMsg::reply_on_success(
         wasm_instantiate(
-            msg.token_code_id,
+            1,
             &TokenInstantiateMsg {
                 name: token_name,
                 symbol: "pcLP".to_string(),
@@ -536,45 +521,57 @@ pub fn execute_swap_operations(
 ) -> Result<Response, ContractError> {
     assert_operations(deps.api, &operations)?;
 
-    let to = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
+    let recipient = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
     let target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
     let messages=Vec::new();
     messages.push(CosmosMsg::Wasm(wasm_execute(
-        operations[0].offer_asset,
+        operations[0].offer_asset_info,
         &Cw20ExecuteMsg::TransferFrom {
-            owner: info.sender.to_string(),
+            owner: sender.to_string(),
             recipient: env.contract.address.to_string(),
-            amount:operations[0].offer_asset.contract_addr.to_string()
-        },.
+            amount:operations[0].ask_asset_info.contract_addr.to_string()
+        },
         vec![],
-    )?))
-    /// TODO Replace with internal handler
+    )?));
+   
     for operation in operations.into_iter().enumerate()  {
         // check if
         if operation.0 == operations_len - 1 {
-            let result=swap_internal(deps,pool_key,offer_asset,belief_price,max_spread);
-    
-            return_amount = result.unwrap()
-            messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: operation.offer_asset.contract_addr.to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient,
-                    amount: return_amount
-                })?,
-                funds: vec![],
-            }))
-        }else{
+            match operation.1 {
+                SwapOperation::AstroSwap {
+                        offer_asset_info,
+                        ask_asset_info,
+                    } => {
+                let pool_key=format!("{:?}",pair_key(&[offer_asset_info,ask_asset_info]));
+                let result=swap_internal(deps,env,pool_key,offer_asset_info,belief_price,max_spread);
+        
+                let return_amount = result.unwrap();
+                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: offer_asset_info.contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient:recipient.to_string(),
+                        amount: return_amount
+                    })?,
+                    funds: vec![],
+                }))
+            }
+                SwapOperation::NativeSwap { .. } => {
+                    return Err(ContractError::NativeSwapNotSupported {})
+            }
+        }
+    }
+        else{
             match operation.1 {
                 SwapOperation::AstroSwap {
                     offer_asset_info,
                     ask_asset_info,
                 } => {
                     
+                    let pool_key=format!("{:?}",pair_key(&[offer_asset_info,ask_asset_info]));
+                let result=swap_internal(deps,env,pool_key,offer_asset,belief_price,max_spread);
     
-                let result=swap_internal(deps,pool_key,offer_asset,belief_price,max_spread);
-    
-                return_amount = result.unwrap()
+                let return_amount = result.unwrap();
                 }
                 SwapOperation::NativeSwap { .. } => {
                     return Err(ContractError::NativeSwapNotSupported {})
@@ -583,7 +580,7 @@ pub fn execute_swap_operations(
         }
         
     }
-    Ok(Response::new().add_submessages(messages))
+    Ok(Response::new().add_messages(messages))
 }
 
 
@@ -593,6 +590,8 @@ pub fn execute_swap_operations(
 ///
 /// * **sender** is the sender of the swap operation.
 ///
+/// /// * **pool_key** key of pool with offer and ask.
+/// 
 /// * **offer_asset** proposed asset for swapping.
 ///
 /// * **belief_price** is used to calculate the maximum swap spread.
@@ -602,6 +601,7 @@ pub fn execute_swap_operations(
 /// * **to** sets the recipient of the swap operation.
 fn swap_internal(
     deps: DepsMut,
+    env:Env,
     pool_key:String,
     offer_asset: Asset,
     belief_price: Option<Decimal>,
@@ -634,8 +634,8 @@ fn swap_internal(
         ask_ind,
         &config,
         &env,
-        maker_fee_share,
-        share_fee_share,
+        Decimal256::zero(),
+        Decimal256::zero()
     )?;
     xs[offer_ind] += offer_asset_dec.amount;
     xs[ask_ind] -= swap_result.dy + swap_result.maker_fee + swap_result.share_fee;
@@ -696,7 +696,7 @@ fn swap_internal(
     }
     **/
     // Store observation from precommit data
-    accumulate_swap_sizes(deps.storage, &env)?;
+    //accumulate_swap_sizes(deps.storage, &env)?;
 
     // Store time series data in precommit observation.
     // Skipping small unsafe values which can seriously mess oracle price due to rounding errors.
@@ -710,7 +710,7 @@ fn swap_internal(
         PrecommitObservation::save(deps.storage, &env, base_amount, quote_amount)?;
     }
     
-    POOLS.save(deps.storage,&config.create_key() &config)?;
+    POOLS.save(deps.storage,pool_key, &config)?;
 
     if config.track_asset_balances {
         BALANCES.save(
@@ -723,9 +723,8 @@ fn swap_internal(
             deps.storage,
             &pools[ask_ind].info,
             &(pools[ask_ind].amount.to_uint(ask_asset_prec)?
-                - return_amount
-                - maker_fee
-                - fee_share_amount),
+                - return_amount),
+               
             env.block.height,
         )?;
     }

@@ -1982,7 +1982,9 @@ version = "1.0.2"
 dependencies = [
  "anyhow",
  "astroport 3.8.0",
+ "astroport-circular-buffer",
  "astroport-pair",
+ "astroport-pcl-common",
  "astroport-token",
  "cosmwasm-schema",
  "cosmwasm-std",

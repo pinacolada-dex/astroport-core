@@ -1,7 +1,8 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use astroport::asset::{AssetInfo,Asset};
+use astroport::{asset::{Asset, AssetInfo}, router::SimulateSwapOperationsResponse};
 use cosmwasm_std::{Decimal, Uint128,Binary};
 use astroport::router::{SwapOperation};
+use cw20::Cw20ReceiveMsg;
 
 
 
@@ -25,7 +26,7 @@ pub const MAX_SWAP_OPERATIONS: usize = 50;
 /// This structure describes the execute messages available in the contract.
 #[cw_serde]
 pub enum ExecuteMsg {
-  
+    Receive(Cw20ReceiveMsg),
     /// ExecuteSwapOperations processes multiple swaps while mentioning the minimum amount of tokens to receive for the last swap operation
     ExecuteSwapOperations {
         operations: Vec<SwapOperation>,
@@ -60,4 +61,18 @@ pub enum ExecuteMsg {
         /// Optional binary serialised parameters for custom pool types
         init_params: Option<Binary>,
     }
+}
+#[cw_serde]
+#[derive(QueryResponses)]
+pub enum QueryMsg {
+    /// Config returns configuration parameters for the contract using a custom [`ConfigResponse`] structure
+   
+    /// SimulateSwapOperations simulates multi-hop swap operations
+    #[returns(SimulateSwapOperationsResponse)]
+    SimulateSwapOperations {
+        /// The amount of tokens to swap
+        offer_amount: Uint128,
+        /// The swap operations to perform, each swap involving a specific pool
+        operations: Vec<SwapOperation>,
+    },
 }

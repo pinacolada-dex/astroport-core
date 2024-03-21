@@ -19,7 +19,7 @@ use astroport_pcl_common::utils::{
 };
 use cosmwasm_schema::schemars::gen;
 use cosmwasm_std::{
-    attr, from_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, Coin, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
+    attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, Coin, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
 };
 use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
@@ -28,7 +28,7 @@ use crate::error::ContractError;
 use crate::state::{pair_key, BALANCES, PAIR_BALANCES, POOLS};
 pub(crate) const LP_TOKEN_PRECISION: u8 = 6;
 const MAX_SWAP_OPERATIONS:usize=10;
-const DUMMY_ADDRESS:Addr= Addr::unchecked("PINA_COLADA");
+const DUMMY_ADDRESS:&str ="PINA_COLADA";
 const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 /// Returns the end result of a simulation for one or multiple swap
 /// operations using a [`SimulateSwapOperationsResponse`] object.
@@ -39,7 +39,7 @@ const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 /// These are all the swap operations for which we perform a simulation.
 
 pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{    
-    format!("{:?}", &pair_key(&[assets[0].info,assets[1].info]))
+    format!("{:?}", &pair_key(&[assets[0].clone().info,assets[1].clone().info]))
 }
 /// Validates swap operations.
 ///
@@ -94,7 +94,7 @@ fn assert_operations(api: &dyn Api, operations: &[SwapOperation]) -> Result<(), 
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn execute_provide_liquidity( deps: DepsMut,
+pub fn execute_provide_liquidity( deps: &mut DepsMut,
     env: Env,
     info: MessageInfo,
     mut assets: Vec<Asset>,
@@ -102,7 +102,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
     auto_stake: Option<bool>,
     receiver: Option<String>) -> Result<Response, ContractError> {
     let pool_key=generate_key_from_assets(&assets);
-    let mut config = POOLS.load(deps.storage,pool_key)?;
+    let mut config = POOLS.load(deps.storage,pool_key.clone())?;
 
    
     match assets.len() {
@@ -309,7 +309,7 @@ pub fn execute_provide_liquidity( deps: DepsMut,
 
 }
 pub fn execute_withdraw_liquidity(
-    deps: DepsMut,
+    deps:&mut  DepsMut,
     env: Env,
     info: MessageInfo,
     sender: Addr,
@@ -401,7 +401,7 @@ pub fn execute_withdraw_liquidity(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn execute_create_pair(deps: DepsMut,env: Env, info: MessageInfo, init_params:Option<Binary>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
+pub fn execute_create_pair(deps: &mut DepsMut,env: Env, info: MessageInfo, init_params:Option<Binary>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
     if asset_infos.len() != 2 {
         return Err(StdError::generic_err("asset_infos must contain exactly two elements").into());
     }
@@ -453,16 +453,17 @@ pub fn execute_create_pair(deps: DepsMut,env: Env, info: MessageInfo, init_param
             asset_infos: asset_infos.clone(),
             pair_type: PairType::Custom("concentrated".to_string()),
         },
-        factory_addr:DUMMY_ADDRESS,
+        factory_addr:Addr::unchecked(DUMMY_ADDRESS),
         pool_params,
         pool_state,
         owner: None,
         track_asset_balances: params.track_asset_balances.unwrap_or_default(),
         fee_share: None,
     };
-    let balances=Vec::new();
-    for info in config.pair_info.asset_infos{
-        balances.push(Asset{info,amount:Uint128::zero()})
+    let mut balances=Vec::new();
+
+    for info in &config.pair_info.asset_infos{
+        balances.push(Asset{info:info.clone(),amount:Uint128::zero()})
     }
   
     if config.track_asset_balances {
@@ -470,8 +471,8 @@ pub fn execute_create_pair(deps: DepsMut,env: Env, info: MessageInfo, init_param
             BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
         }
     }
-    let key =  format!("{:?}", &pair_key(&[asset_infos[0],asset_infos[1]]));
-    POOLS.save(deps.storage, key, &config)?;
+    let key =  format!("{:?}", &pair_key(&[asset_infos[0].clone(),asset_infos[1].clone()]));
+    POOLS.save(deps.storage, key.clone(), &config)?;
     PAIR_BALANCES.save(deps.storage,key,&balances);
     //BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
 
@@ -511,29 +512,24 @@ pub fn execute_create_pair(deps: DepsMut,env: Env, info: MessageInfo, init_param
 
 #[allow(clippy::too_many_arguments)]
 pub fn execute_swap_operations(
-    deps: DepsMut,
+    deps:&mut DepsMut,
     env: Env,
     sender: Addr,
     operations: Vec<SwapOperation>,
+    input_amount:Uint128,
     minimum_receive: Option<Uint128>,
     to: Option<String>,
     max_spread: Option<Decimal>,
 ) -> Result<Response, ContractError> {
+
     assert_operations(deps.api, &operations)?;
 
     let recipient = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
     let target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
-    let messages=Vec::new();
-    messages.push(CosmosMsg::Wasm(wasm_execute(
-        operations[0].offer_asset_info,
-        &Cw20ExecuteMsg::TransferFrom {
-            owner: sender.to_string(),
-            recipient: env.contract.address.to_string(),
-            amount:operations[0].ask_asset_info.contract_addr.to_string()
-        },
-        vec![],
-    )?));
+    let mut messages=Vec::new();
+    //initialize 
+    let mut return_amount=input_amount;
    
     for operation in operations.into_iter().enumerate()  {
         // check if
@@ -543,18 +539,27 @@ pub fn execute_swap_operations(
                         offer_asset_info,
                         ask_asset_info,
                     } => {
-                let pool_key=format!("{:?}",pair_key(&[offer_asset_info,ask_asset_info]));
-                let result=swap_internal(deps,env,pool_key,offer_asset_info,belief_price,max_spread);
+                let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
+                let offer_asset=  Asset {
+                    info: offer_asset_info.clone(),
+                    amount:return_amount,
+                };
+                //let result=swap_internal(&deps,&env,pool_key,offer_asset,Some(Decimal::MAX),max_spread).unwrap();
         
-                let return_amount = result.unwrap();
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: offer_asset_info.contract_addr.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient:recipient.to_string(),
-                        amount: return_amount
-                    })?,
-                    funds: vec![],
-                }))
+                //let return_amount = result.unwrap();
+                match ask_asset_info{
+                    AssetInfo::Token { contract_addr }=>{
+                        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: contract_addr.to_string(),
+                            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                                recipient:recipient.to_string(),
+                                amount: return_amount
+                            })?,
+                            funds: vec![],
+                        }))},
+                    AssetInfo::NativeToken{..}=>return Err(ContractError::NativeSwapNotSupported {}),
+                }
+               
             }
                 SwapOperation::NativeSwap { .. } => {
                     return Err(ContractError::NativeSwapNotSupported {})
@@ -568,10 +573,14 @@ pub fn execute_swap_operations(
                     ask_asset_info,
                 } => {
                     
-                    let pool_key=format!("{:?}",pair_key(&[offer_asset_info,ask_asset_info]));
-                let result=swap_internal(deps,env,pool_key,offer_asset,belief_price,max_spread);
+                    let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info]));
+                    let offer_asset= Asset{
+                        info: offer_asset_info.clone(),
+                        amount:return_amount
+                    };
+                    let result=swap_internal(deps,&env,pool_key,offer_asset,None,max_spread);
     
-                let return_amount = result.unwrap();
+                    return_amount = result.unwrap();
                 }
                 SwapOperation::NativeSwap { .. } => {
                     return Err(ContractError::NativeSwapNotSupported {})
@@ -600,8 +609,8 @@ pub fn execute_swap_operations(
 ///
 /// * **to** sets the recipient of the swap operation.
 fn swap_internal(
-    deps: DepsMut,
-    env:Env,
+    deps:&mut DepsMut,
+    env:&Env,
     pool_key:String,
     offer_asset: Asset,
     belief_price: Option<Decimal>,
@@ -610,7 +619,7 @@ fn swap_internal(
     let precisions = Precisions::new(deps.storage)?;
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
-    let mut config = POOLS.load(deps.storage,pool_key)?;
+    let mut config = POOLS.load(deps.storage,pool_key.clone())?;
     let mut pools = query_pools(&deps,&config, &precisions)?;
 
 
@@ -712,21 +721,6 @@ fn swap_internal(
     
     POOLS.save(deps.storage,pool_key, &config)?;
 
-    if config.track_asset_balances {
-        BALANCES.save(
-            deps.storage,
-            &pools[offer_ind].info,
-            &(pools[offer_ind].amount + offer_asset_dec.amount).to_uint(offer_asset_prec)?,
-            env.block.height,
-        )?;
-        BALANCES.save(
-            deps.storage,
-            &pools[ask_ind].info,
-            &(pools[ask_ind].amount.to_uint(ask_asset_prec)?
-                - return_amount),
-               
-            env.block.height,
-        )?;
-    }
+    
     Ok(return_amount)
 }

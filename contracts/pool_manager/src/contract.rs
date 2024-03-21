@@ -3,16 +3,17 @@ use cosmwasm_std::{
     Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsg, SubMsgResult, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
-
+use cw_utils::must_pay;
 
 use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
-use astroport::pair::{QueryMsg as PairQueryMsg, SimulationResponse};
+use astroport::pair::{ SimulationResponse};
 use astroport::querier::query_pair_info;
 use astroport::router::{
-    ConfigResponse, Cw20HookMsg,InstantiateMsg, MigrateMsg, QueryMsg,
+    ConfigResponse, Cw20HookMsg,InstantiateMsg, MigrateMsg, 
     SimulateSwapOperationsResponse, SwapOperation, SwapResponseData, MAX_SWAP_OPERATIONS,
 };
-use crate::msg::ExecuteMsg;
+use cw20::Cw20ReceiveMsg;
+use crate::msg::{ExecuteMsg,QueryMsg};
 use crate::error::ContractError;
 use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
 use astroport_pcl_common::state::{
@@ -65,14 +66,48 @@ pub fn instantiate(
 ///         }** Checks if an ask amount is higher than or equal to the minimum amount to receive.
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    deps: DepsMut,
+    deps: &mut DepsMut,
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        
+        ExecuteMsg::Receive(msg) => receive_cw20(deps, env, msg),
         ExecuteMsg::ExecuteSwapOperations {
+            operations,
+            minimum_receive,
+            to,
+            max_spread,
+        } => {
+            let amount=must_pay(&info,"arch").unwrap();
+            
+            
+            execute_swap_operations(
+            deps,
+            env,
+            info.sender.clone(),
+            operations,
+            amount,
+            minimum_receive,
+            to,
+            max_spread,
+        )
+        },         
+         
+        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
+        
+        ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
+        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(deps,env,info.clone(),info.sender.clone(),amount,assets),
+    }  
+}
+
+pub fn receive_cw20(
+    deps: &mut DepsMut,
+    env: Env,
+    cw20_msg: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    match from_binary(&cw20_msg.msg)? {
+        Cw20HookMsg::ExecuteSwapOperations {
             operations,
             minimum_receive,
             to,
@@ -80,21 +115,15 @@ pub fn execute(
         } => execute_swap_operations(
             deps,
             env,
-            info.sender,
+            Addr::unchecked(cw20_msg.sender),
             operations,
+            cw20_msg.amount,
             minimum_receive,
             to,
             max_spread,
-        ),         
-         
-        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
-        
-        ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
-        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(deps,env,info,info.sender,amount,assets),
-    }  
+        ),
+    }
 }
-
-
 
 /**#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {

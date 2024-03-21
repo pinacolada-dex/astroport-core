@@ -78,7 +78,7 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
 );
 
 pub fn increment_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
-    let mut curr=PAIR_BALANCES.load(deps.storage,key).unwrap();
+    let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
         curr[i].amount-=v;
     }
@@ -86,7 +86,7 @@ pub fn increment_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
 }
 
 pub fn decrease_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
-    let mut curr=PAIR_BALANCES.load(deps.storage,key).unwrap();
+    let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
         curr[i].amount-=v;
     }

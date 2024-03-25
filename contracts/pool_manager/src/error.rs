@@ -1,7 +1,7 @@
 use astroport_pcl_common::consts::MIN_AMP_CHANGING_TIME;
 use cosmwasm_std::{Decimal,ConversionOverflowError, OverflowError, StdError, Uint128};
 use astroport::{asset::MINIMUM_LIQUIDITY_AMOUNT, pair::MAX_FEE_SHARE_BPS};
-use astroport_circular_buffer::error::BufferError;
+
 use astroport_pcl_common::error::PclError;
 use thiserror::Error;
 #[derive(Error, Debug, PartialEq)]

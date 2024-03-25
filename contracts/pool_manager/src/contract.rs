@@ -1,25 +1,22 @@
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, wasm_execute, Addr, Api, Binary, Decimal, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsg, SubMsgResponse, SubMsgResult, Uint128
+    entry_point, from_binary, to_binary, Addr, Api, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, SubMsgResponse, SubMsgResult
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw_utils::{must_pay, parse_instantiate_response_data};
 
-use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
-use astroport::pair::{ SimulationResponse};
-use astroport::querier::query_pair_info;
+
+
+
 use astroport::router::{
-    ConfigResponse, Cw20HookMsg,InstantiateMsg, MigrateMsg, 
-    SimulateSwapOperationsResponse, SwapOperation, SwapResponseData, MAX_SWAP_OPERATIONS,
+    Cw20HookMsg,InstantiateMsg, MigrateMsg,
 };
 use cw20::Cw20ReceiveMsg;
 use crate::msg::{ExecuteMsg,QueryMsg};
 use crate::error::ContractError;
 use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
-use astroport_pcl_common::state::{
-    AmpGamma, Config, PoolParams, PoolState, Precisions, PriceState,
-};
+
 use crate::query::simulate_swap_operations;
-use crate::state::{ PAIR_BALANCES,QUEUED_MINT,POOLS};
+use crate::state::{ QUEUED_MINT,POOLS};
 
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
@@ -34,7 +31,7 @@ pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
-    msg: InstantiateMsg,
+    _msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -93,7 +90,7 @@ pub fn execute(
         )
         },         
          
-        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
+        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id: _,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
         
         ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
         ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(deps,env,info.clone(),info.sender.clone(),amount,assets),
@@ -128,7 +125,7 @@ pub fn receive_cw20(
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
     match msg {
         Reply {
-            id: INSTANTIATE_TOKEN_REPLY_ID,
+            id: _INSTANTIATE_TOKEN_REPLY_ID,
             result:
                 SubMsgResult::Ok(SubMsgResponse {
                     data: Some(data), ..

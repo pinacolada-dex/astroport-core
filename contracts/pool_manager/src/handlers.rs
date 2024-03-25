@@ -2,24 +2,24 @@ use astroport::asset::{addr_opt_validate, format_lp_token_name, Asset, AssetInfo
 use astroport::cosmwasm_ext::{AbsDiff as _, DecimalToInteger, IntegerToDecimal};
 use astroport::factory::PairType;
 use astroport::observation::PrecommitObservation;
-use astroport::pair::{ExecuteMsg as PairExecuteMsg, MIN_TRADE_SIZE};
-use astroport::querier::{query_balance,query_supply, query_pair_info, query_token_balance};
+use astroport::pair::{MIN_TRADE_SIZE};
+use astroport::querier::{query_supply};
 use astroport::token::InstantiateMsg as TokenInstantiateMsg;
 use astroport::router::SwapOperation;
 use astroport::pair_concentrated::{
-    ConcentratedPoolParams, ConcentratedPoolUpdateParams, MigrateMsg, UpdatePoolParams,
+    ConcentratedPoolParams, UpdatePoolParams,
 };
 
 use astroport_pcl_common::{calc_d, get_xcp};
 use astroport_pcl_common::state::{AmpGamma, PoolParams,Config, PoolState, Precisions, PriceState};
 use astroport_pcl_common::utils::{
     assert_max_spread, assert_slippage_tolerance, before_swap_check, calc_provide_fee,
-    check_asset_infos, check_assets, check_cw20_in_pool,  compute_swap,
+    check_asset_infos, check_assets,  compute_swap,
     get_share_in_assets, mint_liquidity_token_message,
 };
-use cosmwasm_schema::schemars::gen;
+
 use cosmwasm_std::{
-    attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, Coin, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
+    attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
 };
 use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
@@ -324,7 +324,7 @@ pub fn execute_withdraw_liquidity(
     }
 
     let precisions = Precisions::new(deps.storage)?;
-    let mut pools = query_pools(&deps,&config, &precisions)?;
+    let pools = query_pools(&deps,&config, &precisions)?;
 
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?;
     let mut messages = vec![];
@@ -401,7 +401,7 @@ pub fn execute_withdraw_liquidity(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn execute_create_pair(deps: &mut DepsMut,env: Env, info: MessageInfo, init_params:Option<Binary>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
+pub fn execute_create_pair(deps: &mut DepsMut,env: Env, _info: MessageInfo, init_params:Option<Binary>,asset_infos:Vec<AssetInfo>) -> Result<Response, ContractError> {
     if asset_infos.len() != 2 {
         return Err(StdError::generic_err("asset_infos must contain exactly two elements").into());
     }
@@ -517,7 +517,7 @@ pub fn execute_swap_operations(
     sender: Addr,
     operations: Vec<SwapOperation>,
     input_amount:Uint128,
-    minimum_receive: Option<Uint128>,
+    _minimum_receive: Option<Uint128>,
     to: Option<String>,
     max_spread: Option<Decimal>,
 ) -> Result<Response, ContractError> {
@@ -525,7 +525,7 @@ pub fn execute_swap_operations(
     assert_operations(deps.api, &operations)?;
 
     let recipient = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
-    let target_asset_info = operations.last().unwrap().get_target_asset_info();
+    let _target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
     let mut messages=Vec::new();
     //initialize 
@@ -539,8 +539,8 @@ pub fn execute_swap_operations(
                         offer_asset_info,
                         ask_asset_info,
                     } => {
-                let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
-                let offer_asset=  Asset {
+                let _pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
+                let _offer_asset=  Asset {
                     info: offer_asset_info.clone(),
                     amount:return_amount,
                 };

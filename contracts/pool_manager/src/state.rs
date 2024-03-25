@@ -2,11 +2,11 @@ use cosmwasm_std::Uint128;
 use cw_storage_plus::{Item,Map, SnapshotMap};
 use itertools::Itertools;
 use astroport::asset::{AssetInfo,Asset};
-use astroport::common::OwnershipProposal;
-use astroport::observation::Observation;
-use astroport_circular_buffer::CircularBuffer;
+
+
+
 use astroport_pcl_common::state::Config;
-use cosmwasm_std::{Addr,DepsMut};
+use cosmwasm_std::{DepsMut};
 /// Stores pool parameters and state.
 
 

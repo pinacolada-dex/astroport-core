@@ -4,14 +4,14 @@ use cosmwasm_std::{Deps, Uint128};
 use crate::error::ContractError;
 
 pub fn simulate_swap_operations(
-    deps: Deps,
+    _deps: Deps,
     offer_amount: Uint128,
-    operations: Vec<SwapOperation>,
+    _operations: Vec<SwapOperation>,
 ) -> Result<SimulateSwapOperationsResponse, ContractError> {
     //assert_operations(deps.api, &operations)?;
 
 
-    let mut return_amount = offer_amount;
+    let return_amount = offer_amount;
 
     /**for operation in operations.into_iter() {
         match operation {

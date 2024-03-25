@@ -91,4 +91,6 @@ pub enum ContractError {
     InvalidZeroAmount{},
     #[error("Invalid number of assets. This pair supports only {0} assets")]
     InvalidNumberOfAssets(usize),
+    #[error("Failed to Parse Reply")]
+    FailedToParseReply{},
 }

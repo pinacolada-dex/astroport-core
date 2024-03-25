@@ -343,7 +343,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
                 return Err(ContractError::PairWasRegistered {});
             }
 
-            let init_response = parse_instantiate_response_data(data.as_slice())
+            let init_response: cw_utils::MsgInstantiateContractResponse = parse_instantiate_response_data(data.as_slice())
                 .map_err(|e| StdError::generic_err(format!("{e}")))?;
 
             let pair_contract = deps.api.addr_validate(&init_response.contract_address)?;

@@ -1,9 +1,8 @@
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, wasm_execute, Addr, Api, Binary, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsg, SubMsgResult, Uint128,
+    entry_point, from_binary, to_binary, wasm_execute, Addr, Api, Binary, Decimal, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsg, SubMsgResponse, SubMsgResult, Uint128
 };
 use cw2::{get_contract_version, set_contract_version};
-use cw_utils::must_pay;
+use cw_utils::{must_pay, parse_instantiate_response_data};
 
 use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
 use astroport::pair::{ SimulationResponse};
@@ -20,7 +19,7 @@ use astroport_pcl_common::state::{
     AmpGamma, Config, PoolParams, PoolState, Precisions, PriceState,
 };
 use crate::query::simulate_swap_operations;
-use crate::state::{ PAIR_BALANCES};
+use crate::state::{ PAIR_BALANCES,QUEUED_MINT,POOLS};
 
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
@@ -80,7 +79,7 @@ pub fn execute(
             max_spread,
         } => {
             let amount=must_pay(&info,"arch").unwrap();
-            
+            assert!(!amount.is_zero(),"Cannot Swap with Zero Input");
             
             execute_swap_operations(
             deps,
@@ -125,7 +124,7 @@ pub fn receive_cw20(
     }
 }
 
-/**#[cfg_attr(not(feature = "library"), entry_point)]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
     match msg {
         Reply {
@@ -135,24 +134,30 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
                     data: Some(data), ..
                 }),
         } => {
-            let mut config = CONFIG.load(deps.storage)?;
-
-            if config.pair_info.liquidity_token != Addr::unchecked("") {
-                return Err(ContractError::Unauthorized {});
-            }
-
+            let pool_key= QUEUED_MINT.load(deps.storage).unwrap();
+            let config=POOLS.may_load(deps.storage, pool_key.clone()).unwrap();
             let init_response = parse_instantiate_response_data(data.as_slice())
-                .map_err(|e| StdError::generic_err(format!("{e}")))?;
-            config.pair_info.liquidity_token =
+            .map_err(|e| StdError::generic_err(format!("{e}")))?;
+            if let Some(mut config)=config{
+                config.pair_info.liquidity_token =
                 deps.api.addr_validate(&init_response.contract_address)?;
-            CONFIG.save(deps.storage, &config)?;
-            Ok(Response::new()
+                POOLS.save(deps.storage,pool_key ,&config)?;
+                QUEUED_MINT.remove(deps.storage);
+                Ok(Response::new()
                 .add_attribute("liquidity_token_addr", config.pair_info.liquidity_token))
+               //return  Err(ContractError::FailedToParseReply {})
+            }else{
+                return  Err(ContractError::FailedToParseReply {})
+            }
+            
+          
+        
+           
         }
         _ => Err(ContractError::FailedToParseReply {}),
     }
 }
-**/
+
 
 /// Exposes all the queries available in the contract.
 /// ## Queries

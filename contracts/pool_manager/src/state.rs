@@ -66,7 +66,9 @@ use cosmwasm_std::{Addr,DepsMut};
         pub info: AssetInfo,
         pub amount: Decimal256,
     }
+    que
  */
+pub const QUEUED_MINT: Item<String> = Item::new("pool_key");
 pub const POOLS:Map<String,Config> = Map::new("pools");
 pub const PAIR_BALANCES:Map<String,Vec<Asset>> = Map::new("pair_balances");
 /// Stores asset balances to query them later at any block height

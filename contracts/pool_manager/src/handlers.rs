@@ -9,7 +9,7 @@ use astroport::router::SwapOperation;
 use astroport::pair_concentrated::{
     ConcentratedPoolParams, ConcentratedPoolUpdateParams, MigrateMsg, UpdatePoolParams,
 };
-use astroport_circular_buffer::BufferManager;
+
 use astroport_pcl_common::{calc_d, get_xcp};
 use astroport_pcl_common::state::{AmpGamma, PoolParams,Config, PoolState, Precisions, PriceState};
 use astroport_pcl_common::utils::{
@@ -25,7 +25,7 @@ use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
 use crate::utils::query_pools;
 use crate::error::ContractError;
-use crate::state::{pair_key, BALANCES, PAIR_BALANCES, POOLS};
+use crate::state::{pair_key, BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
 pub(crate) const LP_TOKEN_PRECISION: u8 = 6;
 const MAX_SWAP_OPERATIONS:usize=10;
 const DUMMY_ADDRESS:&str ="PINA_COLADA";
@@ -473,7 +473,7 @@ pub fn execute_create_pair(deps: &mut DepsMut,env: Env, info: MessageInfo, init_
     }
     let key =  format!("{:?}", &pair_key(&[asset_infos[0].clone(),asset_infos[1].clone()]));
     POOLS.save(deps.storage, key.clone(), &config)?;
-    PAIR_BALANCES.save(deps.storage,key,&balances);
+    PAIR_BALANCES.save(deps.storage,key.clone(),&balances)?;
     //BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
 
     let token_name = format_lp_token_name(&asset_infos, &deps.querier)?;
@@ -498,7 +498,7 @@ pub fn execute_create_pair(deps: &mut DepsMut,env: Env, info: MessageInfo, init_
         )?,
         INSTANTIATE_TOKEN_REPLY_ID,
     );
-
+    QUEUED_MINT.save(deps.storage, &key)?;
     Ok(Response::new().add_submessage(sub_msg).add_attribute(
         "asset_balances_tracking".to_owned(),
         if config.track_asset_balances {

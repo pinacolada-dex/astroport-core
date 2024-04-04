@@ -319,6 +319,9 @@ fn test_swap_route() {
     let mut app = App::default();
     let owner = Addr::unchecked("owner");
     let mut helper = FactoryHelper::init(&mut app, &owner);
+
+    println!("CODE");
+    println!("{:?}",helper.cw20_token_code_id);
     let astro = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "astro", None);
     let inj = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "inj", None);
     let atom = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "atom", None);

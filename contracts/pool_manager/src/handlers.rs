@@ -481,7 +481,7 @@ pub fn execute_create_pair(deps: &mut DepsMut,env: Env, _info: MessageInfo, init
     // Create LP token
     let sub_msg = SubMsg::reply_on_success(
         wasm_instantiate(
-            1,
+            2,
             &TokenInstantiateMsg {
                 name: token_name,
                 symbol: "pcLP".to_string(),

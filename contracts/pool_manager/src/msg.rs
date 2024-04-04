@@ -52,7 +52,7 @@ pub enum ExecuteMsg {
         assets: Vec<Asset>,
         amount: Uint128,
     },
-    CreatePairMsg {
+    CreatePair {
         /// Information about assets in the pool
         asset_infos: Vec<AssetInfo>,
         /// The token contract code ID used for the tokens in the pool

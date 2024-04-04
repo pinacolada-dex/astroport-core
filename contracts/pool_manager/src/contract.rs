@@ -62,13 +62,13 @@ pub fn instantiate(
 ///         }** Checks if an ask amount is higher than or equal to the minimum amount to receive.
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
-    deps: &mut DepsMut,
+    mut deps:DepsMut,
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Receive(msg) => receive_cw20(deps, env, msg),
+        ExecuteMsg::Receive(msg) => receive_cw20(&mut deps, env, msg),
         ExecuteMsg::ExecuteSwapOperations {
             operations,
             minimum_receive,
@@ -79,7 +79,7 @@ pub fn execute(
             assert!(!amount.is_zero(),"Cannot Swap with Zero Input");
             
             execute_swap_operations(
-            deps,
+            &mut deps,
             env,
             info.sender.clone(),
             operations,
@@ -90,10 +90,10 @@ pub fn execute(
         )
         },         
          
-        ExecuteMsg::CreatePairMsg{asset_infos,token_code_id: _,init_params}=>execute_create_pair(deps, env, info,init_params,asset_infos),
+        ExecuteMsg::CreatePair{asset_infos,token_code_id: _,init_params}=>execute_create_pair(&mut deps, env, info,init_params,asset_infos),
         
-        ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
-        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(deps,env,info.clone(),info.sender.clone(),amount,assets),
+        ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(&mut deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
+        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(&mut deps,env,info.clone(),info.sender.clone(),amount,assets),
     }  
 }
 
@@ -146,10 +146,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
             }else{
                 return  Err(ContractError::FailedToParseReply {})
             }
-            
-          
-        
-           
+                  
         }
         _ => Err(ContractError::FailedToParseReply {}),
     }

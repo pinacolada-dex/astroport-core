@@ -1,73 +1,55 @@
-use cosmwasm_std::Uint128;
+use cosmwasm_std::{Addr, CustomQuery, Order, StdResult, Storage, Uint128};
 use cw_storage_plus::{Item,Map, SnapshotMap};
 use itertools::Itertools;
 use astroport::asset::{AssetInfo,Asset};
 
 
 
-use astroport_pcl_common::state::Config;
+use astroport_pcl_common::{error::PclError, state::Config};
 use cosmwasm_std::{DepsMut};
 /// Stores pool parameters and state.
 
+pub struct Precisions(Vec<(String, u8)>);
 
-/// Stores the latest contract ownership transfer proposal
-/**
- * EXAMPLE CONFIG
- * let pool_state = PoolState {
-        initial: AmpGamma::default(),
-        future: AmpGamma::new(params.amp, params.gamma)?,
-        future_time: env.block.time.seconds(),
-        initial_time: 0,
-        price_state: PriceState {
-            oracle_price: params.price_scale.into(),
-            last_price: params.price_scale.into(),
-            price_scale: params.price_scale.into(),
-            last_price_update: env.block.time.seconds(),
-            xcp_profit: Decimal256::zero(),
-            xcp_profit_real: Decimal256::zero(),
-        },
-    };
+impl<'a> Precisions {
+    /// Stores map of AssetInfo (as String) -> precision
+    const PRECISIONS: Map<'a, String, u8> = Map::new("precisions");
+    pub fn new(storage: &dyn Storage) -> StdResult<Self> {
+        let items = Self::PRECISIONS
+            .range(storage, None, None, Order::Ascending)
+            .collect::<StdResult<Vec<_>>>()?;
 
-    let config = Config {
-        pair_info: PairInfo {
-            contract_addr: env.contract.address.clone(),
-            liquidity_token: Addr::unchecked(""),
-            asset_infos: msg.asset_infos.clone(),
-            pair_type: PairType::Custom("concentrated".to_string()),
-        },
-        factory_addr,
-        pool_params,
-        pool_state,
-        owner: None,
-        track_asset_balances: params.track_asset_balances.unwrap_or_default(),
-        fee_share: None,
-    };
-    
-    ASSET TYPES
-    #[derive(Hash, Eq)]
-    pub enum AssetInfo {
-        /// Non-native Token
-        Token { contract_addr: Addr },
-        /// Native token
-        NativeToken { denom: String },
-    }
-   
-    #[cw_serde]
-    pub struct Asset {
-        /// Information about an asset stored in a [`AssetInfo`] struct
-        pub info: AssetInfo,
-        /// A token amount
-        pub amount: Uint128,
+        Ok(Self(items))
     }
 
-    /// This struct describes a Terra asset as decimal.
-    #[cw_serde]
-    pub struct DecimalAsset {
-        pub info: AssetInfo,
-        pub amount: Decimal256,
+    /// Store all token precisions
+    pub fn store_precisions<C: CustomQuery>(
+        deps: DepsMut<C>,
+        asset_infos: &[AssetInfo],
+        factory_addr: &Addr,
+    ) -> StdResult<()> {
+        for asset_info in asset_infos {
+            let precision = 18_u8;
+            Self::PRECISIONS.save(deps.storage, asset_info.to_string(), &precision)?;
+        }
+
+        Ok(())
     }
-    que
- */
+
+    pub fn get_precision(&self, asset_info: &AssetInfo) -> Result<u8, PclError> {
+        self.0
+            .iter()
+            .find_map(|(info, prec)| {
+                if info == &asset_info.to_string() {
+                    Some(*prec)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| PclError::InvalidAsset(asset_info.to_string()))
+    }
+}
+
 pub const QUEUED_MINT: Item<String> = Item::new("pool_key");
 pub const POOLS:Map<String,Config> = Map::new("pools");
 pub const PAIR_BALANCES:Map<String,Vec<Asset>> = Map::new("pair_balances");
@@ -79,15 +61,15 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     cw_storage_plus::Strategy::EveryBlock,
 );
 
-pub fn increment_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
+pub fn increment_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
     let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
-        curr[i].amount-=v;
+        curr[i].amount+=v;
     }
     PAIR_BALANCES.save(deps.storage,key,&curr);
 }
 
-pub fn decrease_pair_balances(deps:DepsMut,key:String,amounts:Vec<Uint128>){
+pub fn decrease_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
     let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
         curr[i].amount-=v;

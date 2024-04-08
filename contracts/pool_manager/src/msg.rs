@@ -1,5 +1,5 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
-use astroport::{asset::{Asset, AssetInfo}, router::SimulateSwapOperationsResponse};
+use astroport::{asset::{Asset, AssetInfo, PairInfo}, pair::PoolResponse, router::SimulateSwapOperationsResponse};
 use cosmwasm_std::{Decimal, Uint128,Binary};
 use astroport::router::{SwapOperation};
 use cw20::Cw20ReceiveMsg;
@@ -75,4 +75,10 @@ pub enum QueryMsg {
         /// The swap operations to perform, each swap involving a specific pool
         operations: Vec<SwapOperation>,
     },
+    #[returns(PoolResponse)]
+    Pool{pool_key:String},
+    #[returns(PairInfo)]
+    Pair{pool_key:String},
+
+    
 }

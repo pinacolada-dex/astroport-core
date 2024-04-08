@@ -94,7 +94,7 @@ where
 {
     let res: TokenInfoResponse =
         querier.query_wasm_smart(contract_addr, &Cw20QueryMsg::TokenInfo {})?;
-
+    
     Ok(res.total_supply)
 }
 

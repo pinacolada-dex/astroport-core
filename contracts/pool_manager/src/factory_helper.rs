@@ -2,13 +2,13 @@
 
 
 use anyhow::Result as AnyResult;
-use cosmwasm_std::{coins, Addr, Binary};
+use cosmwasm_std::{coins, Addr, Binary, Decimal};
 use cw20::MinterResponse;
 use cw_multi_test::{App, AppResponse, ContractWrapper, Executor};
 
-use astroport::asset::{AssetInfo, PairInfo};
+use astroport::asset::{Asset, AssetInfo, PairInfo};
 use astroport::factory::{PairConfig, PairType, QueryMsg};
-use crate::msg::ExecuteMsg::CreatePair;
+use crate::msg::ExecuteMsg::{self, CreatePair};
 pub struct FactoryHelper {
     pub owner: Addr,   
     pub pool_manager:Addr,
@@ -36,7 +36,7 @@ impl FactoryHelper {
         &mut self,
         router: &mut App,
         sender: &Addr,
-        pair_type: PairType,
+       
         asset_infos: [AssetInfo; 2],
         init_params: Option<Binary>,
     ) -> AnyResult<Addr> {
@@ -58,8 +58,27 @@ impl FactoryHelper {
         **/
         Ok(self.pool_manager.clone())
     }
-}
+    pub fn provide_liquidity_with_slip_tolerance(
+        &mut self,
+        router: &mut App,
+        sender: &Addr,
+        assets: &[Asset],
+        slippage_tolerance: Option<Decimal>,
+    ) -> AnyResult<AppResponse> {
+       
 
+        let msg = ExecuteMsg::ProvideLiquidity {
+            assets: assets.clone().to_vec(),
+            slippage_tolerance,
+            auto_stake: None,
+            receiver: None,
+        };
+
+        
+        router.execute_contract(sender.clone(), self.pool_manager.clone(), &msg, &[])
+    }
+}
+  
 pub fn instantiate_token(
     app: &mut App,
     token_code_id: u64,
@@ -126,3 +145,4 @@ pub fn mint_native(
 
     app.send_tokens(denom_admin, receiver.clone(), &coins_vec)
 }
+

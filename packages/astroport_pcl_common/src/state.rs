@@ -5,6 +5,7 @@ use cosmwasm_std::{
     attr, Addr, Attribute, CustomQuery, Decimal, Decimal256, DepsMut, Env, Order, StdError,
     StdResult, Storage,
 };
+use cw20::{Cw20QueryMsg, TokenInfoResponse};
 use cw_storage_plus::Map;
 
 use astroport::asset::{AssetInfo, PairInfo};
@@ -304,10 +305,11 @@ impl PoolState {
         cur_xs: &[Decimal256],
         cur_price: Decimal256,
     ) -> StdResult<()> {
+        println!("getting price state");
         let amp_gamma = self.get_amp_gamma(env);
         let block_time = env.block.time.seconds();
         let price_state = &mut self.price_state;
-
+        println!("getting price state");
         if price_state.last_price_update < block_time {
             let arg = Decimal256::from_ratio(
                 block_time - price_state.last_price_update,
@@ -322,7 +324,7 @@ impl PoolState {
 
         let cur_d = calc_d(cur_xs, &amp_gamma)?;
         let xcp = get_xcp(cur_d, price_state.price_scale);
-
+        println!("getting xcp profit");
         if !price_state.xcp_profit_real.is_zero() {
             let xcp_profit_real = xcp / total_lp;
 
@@ -339,7 +341,7 @@ impl PoolState {
         }
 
         let xcp_profit = price_state.xcp_profit;
-
+        println!("getting norm");
         let norm = (price_state.oracle_price / price_state.price_scale).diff(Decimal256::one());
         let scale_delta = Decimal256::from(pool_params.min_price_scale_delta)
             .max(norm * Decimal256::from_ratio(1u8, 10u8));
@@ -398,7 +400,30 @@ impl<'a> Precisions {
 
         Ok(())
     }
+    pub fn store_precisions_pina_colada<C: CustomQuery>(
+        deps: DepsMut<C>,
+        asset_infos: &[AssetInfo],       
+    ) -> StdResult<()> {
+        for asset_info in asset_infos {
+            let decimals= match asset_info {
+                AssetInfo::NativeToken { denom } => {
+                    18u8
+                    
+                }
+                AssetInfo::Token { contract_addr } => {
+                    let res: TokenInfoResponse =
+                        deps.querier.query_wasm_smart(contract_addr, &Cw20QueryMsg::TokenInfo {})?;
+        
+                    res.decimals
+                }
+            };
+           
+       
+            Self::PRECISIONS.save(deps.storage, asset_info.to_string(),  &decimals)?;
+        }
 
+        Ok(())
+    }
     pub fn get_precision(&self, asset_info: &AssetInfo) -> Result<u8, PclError> {
         self.0
             .iter()

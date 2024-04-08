@@ -17,6 +17,8 @@ use astroport_pcl_common::utils::{
     check_asset_infos, check_assets,  compute_swap,
     get_share_in_assets, mint_liquidity_token_message,
 };
+use cosmwasm_schema::serde::de;
+use std::str;
 
 use cosmwasm_std::{
     attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
@@ -25,7 +27,7 @@ use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
 use crate::utils::query_pools;
 use crate::error::ContractError;
-use crate::state::{pair_key, BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
+use crate::state::{pair_key, increment_pair_balances,BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
 pub(crate) const LP_TOKEN_PRECISION: u8 = 6;
 const MAX_SWAP_OPERATIONS:usize=10;
 const DUMMY_ADDRESS:&str ="PINA_COLADA";
@@ -39,7 +41,10 @@ const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 /// These are all the swap operations for which we perform a simulation.
 
 pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{    
-    format!("{:?}", &pair_key(&[assets[0].clone().info,assets[1].clone().info]))
+    str::from_utf8(&pair_key(&[assets[0].clone().info,assets[1].clone().info])).unwrap().to_string()
+}
+pub fn generate_key_from_asset_info(assets:&Vec<AssetInfo>)-> String{    
+    str::from_utf8(&pair_key(&[assets[0].clone(),assets[1].clone()])).unwrap().to_string()
 }
 /// Validates swap operations.
 ///
@@ -102,9 +107,10 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
     auto_stake: Option<bool>,
     receiver: Option<String>) -> Result<Response, ContractError> {
     let pool_key=generate_key_from_assets(&assets);
-    let mut config = POOLS.load(deps.storage,pool_key.clone())?;
-
    
+    let mut config = POOLS.load(deps.storage,pool_key.clone())?;
+    println!("{:?}",config);
+    println!("{:?}",assets.len());
     match assets.len() {
         0 => {
             return Err(StdError::generic_err("Nothing to provide").into());
@@ -129,21 +135,18 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
             ))
         }
     }
-
+    println!("CHECKING ASSETS");
     check_assets(deps.api, &assets)?;
-
+    println!("CHECKING SENT");
     info.funds
         .assert_coins_properly_sent(&assets, &config.pair_info.asset_infos)?;
 
     let precisions = Precisions::new(deps.storage)?;
-    /**
-     * deps:DepsMut,
-    querier: QuerierWrapper,    
-    config: &Config,
-    precisions: &Precisions,
-     */
+  
+    println!("QUERY POOLS");
     let mut pools = query_pools(&deps,&config, &precisions)?;
-
+    
+    println!("QUERY POOLS AGAIN");
     if pools[0].info.equal(&assets[1].info) {
         assets.swap(0, 1);
     }
@@ -153,15 +156,16 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
         Decimal256::with_precision(assets[0].amount, precisions.get_precision(&assets[0].info)?)?,
         Decimal256::with_precision(assets[1].amount, precisions.get_precision(&assets[1].info)?)?,
     ];
-
+    println!("QUERY SHAREE");
+    println!("{}",&config.pair_info.liquidity_token);
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
-
+    println!("{}",total_share);
     // Initial provide can not be one-sided
     if total_share.is_zero() && (deposits[0].is_zero() || deposits[1].is_zero()) {
         return Err(ContractError::InvalidZeroAmount {});
     }
-
+    println!("TRANSFERRING TOKENS");
     let mut messages = vec![];
     for (i, pool) in pools.iter_mut().enumerate() {
         // If the asset is a token contract, then we need to execute a TransferFrom msg to receive assets
@@ -187,23 +191,26 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
             }
         }
     }
-
+    increment_pair_balances( deps ,pool_key.clone(),[assets[0].amount,assets[1].amount].to_vec());
     let mut new_xp = pools
         .iter()
         .enumerate()
         .map(|(ind, pool)| pool.amount + deposits[ind])
         .collect_vec();
+    println!("{:?}",new_xp);
     new_xp[1] *= config.pool_state.price_state.price_scale;
-
+    println!("{:?}",new_xp);
     let amp_gamma = config.pool_state.get_amp_gamma(&env);
     let new_d = calc_d(&new_xp, &amp_gamma)?;
-
+    
     let share = if total_share.is_zero() {
+        println!("total share is zero");
         let xcp = get_xcp(new_d, config.pool_state.price_state.price_scale);
+        println!("{:?}",xcp);
         let mint_amount = xcp
             .checked_sub(MINIMUM_LIQUIDITY_AMOUNT.to_decimal256(LP_TOKEN_PRECISION)?)
             .map_err(|_| ContractError::MinimumLiquidityAmountError {})?;
-
+        println!("{:?}",mint_amount);
         messages.extend(mint_liquidity_token_message(
             deps.querier,
             &config,
@@ -223,8 +230,12 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
 
         mint_amount
     } else {
+        println!("total share note zero");
+        println!("{:?}",pools);
         let mut old_xp = pools.iter().map(|a| a.amount).collect_vec();
+       
         old_xp[1] *= config.pool_state.price_state.price_scale;
+        println!("{:?}",old_xp);
         let old_d = calc_d(&old_xp, &amp_gamma)?;
         let share = (total_share * new_d / old_d).saturating_sub(total_share);
 
@@ -236,19 +247,27 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
 
     // calculate accrued share
     let share_ratio = share / (total_share + share);
+    println!("share ratio");
+    println!("{:?}",share_ratio);
     let balanced_share = vec![
         new_xp[0] * share_ratio,
         new_xp[1] * share_ratio / config.pool_state.price_state.price_scale,
     ];
+   
     let assets_diff = vec![
         deposits[0].diff(balanced_share[0]),
         deposits[1].diff(balanced_share[1]),
     ];
 
     let mut slippage = Decimal256::zero();
-
+  
+    println!("asset difference");
+    println!("{:?}",balanced_share);
+    
+    println!("{:?}",assets_diff);
     // If deposit doesn't diverge too much from the balanced share, we don't update the price
     if assets_diff[0] >= MIN_TRADE_SIZE && assets_diff[1] >= MIN_TRADE_SIZE {
+        println!("UPDATING PRICE");
         slippage = assert_slippage_tolerance(
             &deposits,
             share,
@@ -265,9 +284,9 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
             last_price,
         )?;
     }
-
+  
     let share_uint128 = share.to_uint(LP_TOKEN_PRECISION)?;
-
+    //println!("UPDATING PRICE");
     // Mint LP tokens for the sender or for the receiver (if set)
     let receiver = addr_opt_validate(deps.api, &receiver)?.unwrap_or_else(|| info.sender.clone());
     let auto_stake = auto_stake.unwrap_or(false);
@@ -279,7 +298,7 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
         share_uint128,
         auto_stake,
     )?);
-
+    
     if config.track_asset_balances {
         for (i, pool) in pools.iter().enumerate() {
             BALANCES.save(
@@ -418,7 +437,7 @@ pub fn execute_create_pair(deps: &mut DepsMut,env: Env, _info: MessageInfo, init
     }
 
     
-
+    Precisions::store_precisions_pina_colada(deps.branch(), &asset_infos)?;
    
 
     let mut pool_params = PoolParams::default();
@@ -470,8 +489,10 @@ pub fn execute_create_pair(deps: &mut DepsMut,env: Env, _info: MessageInfo, init
         for asset in &config.pair_info.asset_infos {
             BALANCES.save(deps.storage, asset, &Uint128::zero(), env.block.height)?;
         }
-    }
-    let key =  format!("{:?}", &pair_key(&[asset_infos[0].clone(),asset_infos[1].clone()]));
+    }       
+    
+    let key =  generate_key_from_asset_info(&asset_infos);
+    println!("{:?}",key);
     POOLS.save(deps.storage, key.clone(), &config)?;
     PAIR_BALANCES.save(deps.storage,key.clone(),&balances)?;
     //BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
@@ -539,14 +560,14 @@ pub fn execute_swap_operations(
                         offer_asset_info,
                         ask_asset_info,
                     } => {
-                let _pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
-                let _offer_asset=  Asset {
+                let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
+                let offer_asset=  Asset {
                     info: offer_asset_info.clone(),
                     amount:return_amount,
                 };
-                //let result=swap_internal(&deps,&env,pool_key,offer_asset,Some(Decimal::MAX),max_spread).unwrap();
+                let return_amount=swap_internal(deps,&env,pool_key,offer_asset,Some(Decimal::MAX),max_spread).unwrap();
         
-                //let return_amount = result.unwrap();
+               
                 match ask_asset_info{
                     AssetInfo::Token { contract_addr }=>{
                         messages.push(CosmosMsg::Wasm(WasmMsg::Execute {

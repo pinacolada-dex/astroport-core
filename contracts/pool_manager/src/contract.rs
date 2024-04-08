@@ -1,5 +1,9 @@
+use astroport::asset::Asset;
+use astroport::pair::PoolResponse;
+use astroport::querier::query_supply;
+
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Addr, Api, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, SubMsgResponse, SubMsgResult
+    entry_point, from_binary, to_binary, Addr, Api, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsgResponse, SubMsgResult, Uint128
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw_utils::{must_pay, parse_instantiate_response_data};
@@ -16,7 +20,7 @@ use crate::error::ContractError;
 use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
 
 use crate::query::simulate_swap_operations;
-use crate::state::{ QUEUED_MINT,POOLS};
+use crate::state::{ PAIR_BALANCES, POOLS, QUEUED_MINT};
 
 /// Contract name that is used for migration.
 const CONTRACT_NAME: &str = "pina-colada";
@@ -172,8 +176,22 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
             offer_amount,
             operations,
         )?)?),
-    }
+        QueryMsg::Pool {pool_key} => Ok(to_binary(&query_pool(deps,pool_key)?)?),
+        QueryMsg::Pair {pool_key} => Ok(to_binary(&POOLS.load(deps.storage,pool_key)?.pair_info)?),
 }
+}
+fn query_pool(deps: Deps,pool_key:String)->StdResult<PoolResponse>{
+    let config= POOLS.load(deps.storage,pool_key.clone())?;
+    let assets= PAIR_BALANCES.load(deps.storage,pool_key.clone())?;
+    let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?;
+    let resp = PoolResponse {
+        assets,
+        total_share,
+    };
+
+    Ok(resp)
+}
+
 
 
 /// Manages contract migration.

@@ -8,7 +8,7 @@ use cosmwasm_std::{coins, from_binary, to_binary, Addr, Decimal, Empty, StdError
 use cw20::Cw20ExecuteMsg;
 use cw_multi_test::{App, Contract, ContractWrapper, Executor};
 
-use astroport::asset::{native_asset_info, token_asset_info};
+use astroport::asset::{native_asset_info, token_asset, token_asset_info};
 use astroport::factory::PairType;
 use astroport::router::{
     Cw20HookMsg,InstantiateMsg, MigrateMsg,
@@ -17,7 +17,7 @@ use astroport::pair_concentrated::{
     ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams, QueryMsg,
 };
 use crate::error::ContractError;
-
+use crate::msg::ExecuteMsg;
 use crate::factory_helper::{instantiate_token, mint, mint_native, FactoryHelper};
 
 pub fn common_pcl_params() -> ConcentratedPoolParams {
@@ -79,28 +79,62 @@ fn pool_manager_works() {
             None,
         )
         .unwrap();
+     
         let mut helper = FactoryHelper::init(&mut app, &owner,&pool_manager);
         let token_x = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "TOX", None);
         let token_y = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "TOY", None);
         let token_z = instantiate_token(&mut app, helper.cw20_token_code_id, &owner, "TOZ", None);
+        println!("{}",pool_manager);
+        println!("{}",token_x);
+        println!("{}",token_y);
+        println!("{}",token_z);
+        let params = ConcentratedPoolParams {
+            price_scale: Decimal::from_ratio(1u8, 2u8),
+            ..common_pcl_params()
+        };
         for (a, b, typ, liq) in [
-            (&token_x, &token_y, PairType::Xyk {}, 100_000_000000),
-            (&token_y, &token_z, PairType::Stable {}, 1_000_000_000000),
+            (&token_x, &token_y, PairType::Xyk {}, 200_000_000000),
+            (&token_y, &token_z, PairType::Stable {}, 2_000_000_000000),
         ] {
-            let params=Some(to_binary(&common_pcl_params()).unwrap());
+            let params=Some(to_binary(&params).unwrap());
             let pair = helper
                 .create_pair(
                     &mut app,
-                    &owner,
-                    typ,
+                    &owner,                    
                     [token_asset_info(a.clone()), token_asset_info(b.clone())],
                     params,
                 )
                 .unwrap();
-            mint(&mut app, &owner, a, liq, &pair).unwrap();
-            mint(&mut app, &owner, b, liq, &pair).unwrap();
+            mint(&mut app, &owner, a, liq, &owner).unwrap();
+            mint(&mut app, &owner, b, liq, &owner).unwrap();
             
+             
         }
+        let n=100_000_000000u128;
+        let assets1=[token_asset(token_x.clone(),n.into()),token_asset(token_y.clone(),n.into())].to_vec();
+        let provide_msg=ExecuteMsg::ProvideLiquidity{
+                assets:assets1,
+                slippage_tolerance:Some(f64_to_dec(0.5)),
+                auto_stake:None,
+                receiver:None
+            };
+        let msg = Cw20ExecuteMsg::IncreaseAllowance {
+                spender: pool_manager.to_string(),
+                expires: None,
+                amount:(2*n).into(),
+            };
+        
+        app.execute_contract(owner.clone(), token_x.clone(), &msg, &[])
+                .unwrap();
+            
+        
+        app.execute_contract(owner.clone(), token_y.clone(), &msg, &[])
+                .unwrap();
+
+            
+        app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
+        app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
+       
     }
    
 

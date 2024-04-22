@@ -46,7 +46,6 @@ cw-utils = "1.0.1"
 cw-multi-test = "0.15"
 anyhow = "1.0"
 [dev-dependencies]
-
 astroport-token = { path = "../token" }
 astroport-pair = { path = "../pair" }
 cw20 = "0.15"

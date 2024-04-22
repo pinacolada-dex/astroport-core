@@ -4,14 +4,15 @@ use std::error::Error;
 use std::fmt::Display;
 use std::str::FromStr;
 
-use cosmwasm_std::{coins, from_binary, to_binary, Addr, Decimal, Empty, StdError};
-use cw20::Cw20ExecuteMsg;
+use astroport::token;
+use cosmwasm_std::{coins, from_binary, to_binary, Addr, Decimal, Empty, StdError, Uint128};
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_multi_test::{App, Contract, ContractWrapper, Executor};
 
-use astroport::asset::{native_asset_info, token_asset, token_asset_info};
+use astroport::asset::{native_asset_info, token_asset, token_asset_info, AssetInfo};
 use astroport::factory::PairType;
 use astroport::router::{
-    Cw20HookMsg,InstantiateMsg, MigrateMsg,
+    Cw20HookMsg,InstantiateMsg, MigrateMsg, SwapOperation,
 };
 use astroport::pair_concentrated::{
     ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams, QueryMsg,
@@ -63,7 +64,7 @@ fn pool_manager_works() {
     let mut app = App::default();
 
     let owner = Addr::unchecked("owner");
-   
+    let user = Addr::unchecked("user");
 
    
     let router_code = app.store_code(router_contract());
@@ -107,7 +108,8 @@ fn pool_manager_works() {
                 .unwrap();
             mint(&mut app, &owner, a, liq, &owner).unwrap();
             mint(&mut app, &owner, b, liq, &owner).unwrap();
-            
+            mint(&mut app, &owner, a, liq, &user).unwrap();
+            mint(&mut app, &owner, b, liq, &user).unwrap();
              
         }
         let n=100_000_000000u128;
@@ -134,6 +136,29 @@ fn pool_manager_works() {
             
         app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
         app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
+
+        let swap_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                sender: String::from("user"),
+                amount: Uint128::from(1000000000u128),
+                msg: to_binary(&Cw20HookMsg::ExecuteSwapOperations {
+                    operations: vec![
+                        SwapOperation::AstroSwap {
+                            offer_asset_info: AssetInfo::Token {
+                                contract_addr: token_y,
+                            },
+                            ask_asset_info: AssetInfo::Token {
+                                contract_addr: token_x,
+                            },
+                        }             
+                    ],
+                    minimum_receive: None,
+                    to: None,
+                    max_spread: None,
+                })
+                .unwrap(),
+            });
+        app.execute_contract(owner.clone(), pool_manager.clone(), &swap_msg, &[])
+            .unwrap();
        
     }
    

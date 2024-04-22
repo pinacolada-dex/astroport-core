@@ -310,6 +310,7 @@ impl PoolState {
         let block_time = env.block.time.seconds();
         let price_state = &mut self.price_state;
         println!("getting price state");
+        println!("{:?}",price_state);
         if price_state.last_price_update < block_time {
             let arg = Decimal256::from_ratio(
                 block_time - price_state.last_price_update,
@@ -323,11 +324,13 @@ impl PoolState {
         price_state.last_price = cur_price;
 
         let cur_d = calc_d(cur_xs, &amp_gamma)?;
+
         let xcp = get_xcp(cur_d, price_state.price_scale);
-        println!("getting xcp profit");
+        println!("{:?}",xcp);
         if !price_state.xcp_profit_real.is_zero() {
             let xcp_profit_real = xcp / total_lp;
-
+            println!("{:?}",xcp_profit_real);
+            println!("{:?}",price_state.xcp_profit_real);
             // If xcp dropped and no ramping happens then this swap makes loss
             if xcp_profit_real < price_state.xcp_profit_real && block_time >= self.future_time {
                 return Err(StdError::generic_err(

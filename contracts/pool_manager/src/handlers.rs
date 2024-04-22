@@ -21,13 +21,13 @@ use cosmwasm_schema::serde::de;
 use std::str;
 
 use cosmwasm_std::{
-    attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, Binary, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
+    attr, from_binary, to_binary, wasm_execute, wasm_instantiate, Addr, Api, BankMsg, Binary, Coin, CosmosMsg, Decimal, Decimal256, DepsMut, Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg
 };
 use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
 use crate::utils::query_pools;
 use crate::error::ContractError;
-use crate::state::{pair_key, increment_pair_balances,BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
+use crate::state::{pair_key, increment_pair_balances,decrease_pair_balances,BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
 pub(crate) const LP_TOKEN_PRECISION: u8 = 6;
 const MAX_SWAP_OPERATIONS:usize=10;
 const DUMMY_ADDRESS:&str ="PINA_COLADA";
@@ -39,12 +39,23 @@ const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 ///
 /// * **operations** is a vector that contains objects of type [`SwapOperation`].
 /// These are all the swap operations for which we perform a simulation.
-
+pub static DENOM: &str = "aarch";
 pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{    
     str::from_utf8(&pair_key(&[assets[0].clone().info,assets[1].clone().info])).unwrap().to_string()
 }
 pub fn generate_key_from_asset_info(assets:&Vec<AssetInfo>)-> String{    
     str::from_utf8(&pair_key(&[assets[0].clone(),assets[1].clone()])).unwrap().to_string()
+}
+pub fn send_native(to: &Addr, amount: Uint128) -> StdResult<CosmosMsg> {
+    let msg = BankMsg::Send {
+        to_address: to.into(),
+        amount: ([Coin {
+            denom: String::from(DENOM),
+            amount,
+        }])
+        .to_vec(),
+    };
+    Ok(msg.into())
 }
 /// Validates swap operations.
 ///
@@ -146,7 +157,7 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
     println!("QUERY POOLS");
     let mut pools = query_pools(&deps,&config, &precisions)?;
     
-    println!("QUERY POOLS AGAIN");
+   
     if pools[0].info.equal(&assets[1].info) {
         assets.swap(0, 1);
     }
@@ -336,12 +347,12 @@ pub fn execute_withdraw_liquidity(
     assets: Vec<Asset>,
 ) -> Result<Response, ContractError> {
     let pool=generate_key_from_assets(&assets);
-    let mut config = POOLS.load(deps.storage,pool)?;
-
+    let mut config = POOLS.load(deps.storage,pool.clone())?;
+    
     if info.sender != config.pair_info.liquidity_token {
         return Err(ContractError::Unauthorized {});
     }
-
+    decrease_pair_balances(deps,pool.clone(),[amount,amount].to_vec());
     let precisions = Precisions::new(deps.storage)?;
     let pools = query_pools(&deps,&config, &precisions)?;
 
@@ -357,7 +368,7 @@ pub fn execute_withdraw_liquidity(
 
     // decrease XCP
     let mut xs = pools.iter().map(|a| a.amount).collect_vec();
-
+    
     xs[0] -= refund_assets[0].amount;
     xs[1] -= refund_assets[1].amount;
     xs[1] *= config.pool_state.price_state.price_scale;
@@ -394,7 +405,7 @@ pub fn execute_withdraw_liquidity(
         )?
         .into(),
     );
-
+   
     if config.track_asset_balances {
         for (i, pool) in pools.iter().enumerate() {
             BALANCES.save(
@@ -560,7 +571,7 @@ pub fn execute_swap_operations(
                         offer_asset_info,
                         ask_asset_info,
                     } => {
-                let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info.clone()]));
+                let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
                 let offer_asset=  Asset {
                     info: offer_asset_info.clone(),
                     amount:return_amount,
@@ -578,7 +589,7 @@ pub fn execute_swap_operations(
                             })?,
                             funds: vec![],
                         }))},
-                    AssetInfo::NativeToken{..}=>return Err(ContractError::NativeSwapNotSupported {}),
+                    AssetInfo::NativeToken{..}=>{messages.push(send_native(&recipient, return_amount).unwrap())},
                 }
                
             }
@@ -594,7 +605,7 @@ pub fn execute_swap_operations(
                     ask_asset_info,
                 } => {
                     
-                    let pool_key=format!("{:?}",pair_key(&[offer_asset_info.clone(),ask_asset_info]));
+                    let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
                     let offer_asset= Asset{
                         info: offer_asset_info.clone(),
                         amount:return_amount
@@ -640,7 +651,9 @@ fn swap_internal(
     let precisions = Precisions::new(deps.storage)?;
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
+    println!("{:?}",pool_key);
     let mut config = POOLS.load(deps.storage,pool_key.clone())?;
+    increment_pair_balances(deps,pool_key.clone(),[offer_asset.amount,Uint128::zero()].to_vec());
     let mut pools = query_pools(&deps,&config, &precisions)?;
 
 
@@ -656,7 +669,8 @@ fn swap_internal(
     before_swap_check(&pools, offer_asset_dec.amount)?;
 
     let mut xs = pools.iter().map(|asset| asset.amount).collect_vec();
-  
+    println!("XS");
+    println!("{:?}",xs);
 
     let swap_result = compute_swap(
         &xs,
@@ -682,7 +696,8 @@ fn swap_internal(
 
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
-
+   
+    decrease_pair_balances(deps,pool_key.clone(),[Uint128::zero(),return_amount].to_vec());
     // Skip very small trade sizes which could significantly mess up the price due to rounding errors,
     // especially if token precisions are 18.
     if (swap_result.dy + swap_result.maker_fee + swap_result.share_fee) >= MIN_TRADE_SIZE

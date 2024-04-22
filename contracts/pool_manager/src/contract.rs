@@ -6,16 +6,17 @@ use cosmwasm_std::{
     entry_point, from_binary, to_binary, Addr, Api, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsgResponse, SubMsgResult, Uint128
 };
 use cw2::{get_contract_version, set_contract_version};
+use cw20::Cw20ReceiveMsg;
 use cw_utils::{must_pay, parse_instantiate_response_data};
 
 
 
 
 use astroport::router::{
-    Cw20HookMsg,InstantiateMsg, MigrateMsg,
+    InstantiateMsg, MigrateMsg,
 };
-use cw20::Cw20ReceiveMsg;
-use crate::msg::{ExecuteMsg,QueryMsg};
+
+use crate::msg::{ExecuteMsg,QueryMsg,Cw20HookMsg};
 use crate::error::ContractError;
 use crate::handlers::{execute_swap_operations,execute_create_pair,execute_provide_liquidity,execute_withdraw_liquidity};
 
@@ -72,7 +73,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Receive(msg) => receive_cw20(&mut deps, env, msg),
+        ExecuteMsg::Receive(msg) => receive_cw20(&mut deps, env,info, msg),
         ExecuteMsg::ExecuteSwapOperations {
             operations,
             minimum_receive,
@@ -97,13 +98,14 @@ pub fn execute(
         ExecuteMsg::CreatePair{asset_infos,token_code_id: _,init_params}=>execute_create_pair(&mut deps, env, info,init_params,asset_infos),
         
         ExecuteMsg::ProvideLiquidity{assets,slippage_tolerance,auto_stake,receiver}=>execute_provide_liquidity(&mut deps, env, info,assets,slippage_tolerance,auto_stake,receiver),
-        ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(&mut deps,env,info.clone(),info.sender.clone(),amount,assets),
+       // ExecuteMsg::WithdrawLiquidity{assets,amount}=>execute_withdraw_liquidity(&mut deps,env,info.clone(),info.sender.clone(),amount,assets),
     }  
 }
 
 pub fn receive_cw20(
     deps: &mut DepsMut,
     env: Env,
+    info:MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     match from_binary(&cw20_msg.msg)? {
@@ -122,6 +124,7 @@ pub fn receive_cw20(
             to,
             max_spread,
         ),
+        Cw20HookMsg::WithdrawLiquidity { assets } => execute_withdraw_liquidity(deps,env,info.clone(),info.sender.clone(),cw20_msg.amount,assets)
     }
 }
 

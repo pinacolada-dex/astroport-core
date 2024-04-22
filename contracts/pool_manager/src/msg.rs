@@ -48,10 +48,7 @@ pub enum ExecuteMsg {
         /// The receiver of LP tokens
         receiver: Option<String>,
     },
-    WithdrawLiquidity{
-        assets: Vec<Asset>,
-        amount: Uint128,
-    },
+    
     CreatePair {
         /// Information about assets in the pool
         asset_infos: Vec<AssetInfo>,
@@ -81,4 +78,22 @@ pub enum QueryMsg {
     Pair{pool_key:String},
 
     
+}
+#[cw_serde]
+pub enum Cw20HookMsg {
+    ExecuteSwapOperations {
+        /// A vector of swap operations
+        operations: Vec<SwapOperation>,
+        /// The minimum amount of tokens to get from a swap
+        minimum_receive: Option<Uint128>,
+        /// The recipient
+        to: Option<String>,
+        /// Max spread
+        max_spread: Option<Decimal>,
+    },
+    /// Withdraw liquidity from the pool
+    WithdrawLiquidity {
+        #[serde(default)]
+        assets: Vec<Asset>,
+    },
 }

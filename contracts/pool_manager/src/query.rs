@@ -1,8 +1,8 @@
-use astroport::router::{SimulateSwapOperationsResponse, SwapOperation};
+use astroport::router::{SimulateSwapOperationsResponse};
 use cosmwasm_std::{Deps, Uint128};
 
 use crate::error::ContractError;
-
+use crate::msg::SwapOperation;
 pub fn simulate_swap_operations(
     _deps: Deps,
     offer_amount: Uint128,

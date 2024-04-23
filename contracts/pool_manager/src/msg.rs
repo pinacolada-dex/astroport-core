@@ -1,7 +1,7 @@
 use cosmwasm_schema::{cw_serde, QueryResponses};
 use astroport::{asset::{Asset, AssetInfo, PairInfo}, pair::PoolResponse, router::SimulateSwapOperationsResponse};
 use cosmwasm_std::{Decimal, Uint128,Binary};
-use astroport::router::{SwapOperation};
+
 use cw20::Cw20ReceiveMsg;
 
 
@@ -9,6 +9,19 @@ use cw20::Cw20ReceiveMsg;
 pub const MAX_SWAP_OPERATIONS: usize = 50;
 
 /// This structure holds the parameters used for creating a contract.
+#[cw_serde]
+
+
+pub struct SwapOperation {
+   
+    /// ASTRO swap
+    
+        /// Information about the asset being swapped
+    pub offer_asset_info: AssetInfo,
+        /// Information about the asset we swap to
+    pub ask_asset_info: AssetInfo,
+    
+}
 
 
 

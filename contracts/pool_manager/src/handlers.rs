@@ -5,7 +5,7 @@ use astroport::observation::PrecommitObservation;
 use astroport::pair::{MIN_TRADE_SIZE};
 use astroport::querier::{query_supply};
 use astroport::token::InstantiateMsg as TokenInstantiateMsg;
-use astroport::router::SwapOperation;
+
 use astroport::pair_concentrated::{
     ConcentratedPoolParams, UpdatePoolParams,
 };
@@ -25,6 +25,7 @@ use cosmwasm_std::{
 };
 use itertools::Itertools;
 use cw20::{Cw20ExecuteMsg, MinterResponse};
+use crate::msg::SwapOperation;
 use crate::utils::query_pools;
 use crate::error::ContractError;
 use crate::state::{pair_key, increment_pair_balances,decrease_pair_balances,BALANCES, QUEUED_MINT,PAIR_BALANCES, POOLS};
@@ -40,6 +41,8 @@ const INSTANTIATE_TOKEN_REPLY_ID:u64=1;
 /// * **operations** is a vector that contains objects of type [`SwapOperation`].
 /// These are all the swap operations for which we perform a simulation.
 pub static DENOM: &str = "aarch";
+
+
 pub fn generate_key_from_assets(assets:&Vec<Asset>)-> String{    
     str::from_utf8(&pair_key(&[assets[0].clone().info,assets[1].clone().info])).unwrap().to_string()
 }
@@ -73,15 +76,8 @@ fn assert_operations(api: &dyn Api, operations: &[SwapOperation]) -> Result<(), 
     let mut prev_ask_asset: Option<AssetInfo> = None;
 
     for operation in operations {
-        let (offer_asset, ask_asset) = match operation {
-            SwapOperation::AstroSwap {
-                offer_asset_info,
-                ask_asset_info,
-            } => (offer_asset_info.clone(), ask_asset_info.clone()),
-            SwapOperation::NativeSwap { .. } => {
-                return Err(ContractError::NativeSwapNotSupported {})
-            }
-        };
+        let (offer_asset, ask_asset) =(operation.offer_asset_info.clone(),
+            operation.ask_asset_info.clone());
 
         offer_asset.check(api)?;
         ask_asset.check(api)?;
@@ -557,21 +553,17 @@ pub fn execute_swap_operations(
     assert_operations(deps.api, &operations)?;
 
     let recipient = addr_opt_validate(deps.api, &to)?.unwrap_or(sender);
-    let _target_asset_info = operations.last().unwrap().get_target_asset_info();
+    //let _target_asset_info = operations.last().unwrap().get_target_asset_info();
     let operations_len = operations.len();
     let mut messages=Vec::new();
     //initialize 
     let mut return_amount=input_amount;
    
     for operation in operations.into_iter().enumerate()  {
-        // check if
+        let (offer_asset_info,ask_asset_info)= (operation.1.offer_asset_info,operation.1.ask_asset_info);
         if operation.0 == operations_len - 1 {
-            match operation.1 {
-                SwapOperation::AstroSwap {
-                        offer_asset_info,
-                        ask_asset_info,
-                    } => {
-                let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
+            
+            let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
                 let offer_asset=  Asset {
                     info: offer_asset_info.clone(),
                     amount:return_amount,
@@ -593,34 +585,27 @@ pub fn execute_swap_operations(
                 }
                
             }
-                SwapOperation::NativeSwap { .. } => {
-                    return Err(ContractError::NativeSwapNotSupported {})
-            }
-        }
-    }
-        else{
-            match operation.1 {
-                SwapOperation::AstroSwap {
-                    offer_asset_info,
-                    ask_asset_info,
-                } => {
-                    
-                    let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
-                    let offer_asset= Asset{
-                        info: offer_asset_info.clone(),
-                        amount:return_amount
-                    };
-                    let result=swap_internal(deps,&env,pool_key,offer_asset,None,max_spread);
-    
-                    return_amount = result.unwrap();
-                }
-                SwapOperation::NativeSwap { .. } => {
-                    return Err(ContractError::NativeSwapNotSupported {})
-                }
-            }
-        }
+               
         
-    }
+    
+        else {
+            
+            let pool_key=generate_key_from_asset_info(&[offer_asset_info.clone(),ask_asset_info.clone()].to_vec());
+            let offer_asset= Asset{
+                info: offer_asset_info.clone(),
+                amount:return_amount
+            };
+            println!("{}",pool_key);
+            let result=swap_internal(deps,&env,pool_key,offer_asset,Some(Decimal::MAX),max_spread);
+
+            return_amount = result.unwrap();      
+                
+                
+               
+            
+        }
+    }  
+    
     Ok(Response::new().add_messages(messages))
 }
 

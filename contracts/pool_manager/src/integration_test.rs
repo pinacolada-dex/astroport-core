@@ -8,12 +8,13 @@ use astroport::token;
 use cosmwasm_std::{coins, from_binary, to_binary, Addr, Decimal, Empty, StdError, Uint128};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_multi_test::{App, Contract, ContractWrapper, Executor};
-
+use crate::msg::SwapOperation;
 use astroport::asset::{native_asset_info, token_asset, token_asset_info, AssetInfo};
 use astroport::factory::PairType;
 use astroport::router::{
-    Cw20HookMsg,InstantiateMsg, MigrateMsg, SwapOperation,
+   InstantiateMsg, MigrateMsg
 };
+use crate::msg::Cw20HookMsg;
 use astroport::pair_concentrated::{
     ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams, QueryMsg,
 };
@@ -94,8 +95,8 @@ fn pool_manager_works() {
             ..common_pcl_params()
         };
         for (a, b, typ, liq) in [
-            (&token_x, &token_y, PairType::Xyk {}, 200_000_000000),
-            (&token_y, &token_z, PairType::Stable {}, 2_000_000_000000),
+            (&token_x, &token_y, PairType::Xyk {}, 800_000_000000),
+            (&token_y, &token_z, PairType::Stable {}, 900_000_000000),
         ] {
             let params=Some(to_binary(&params).unwrap());
             let pair = helper
@@ -112,10 +113,17 @@ fn pool_manager_works() {
             mint(&mut app, &owner, b, liq, &user).unwrap();
              
         }
-        let n=100_000_000000u128;
+        let n=10_000_00000u128;
         let assets1=[token_asset(token_x.clone(),n.into()),token_asset(token_y.clone(),n.into())].to_vec();
+        let assets2=[token_asset(token_y.clone(),n.into()),token_asset(token_z.clone(),n.into())].to_vec();
         let provide_msg=ExecuteMsg::ProvideLiquidity{
                 assets:assets1,
+                slippage_tolerance:Some(f64_to_dec(0.5)),
+                auto_stake:None,
+                receiver:None
+            };
+        let provide_msg2=ExecuteMsg::ProvideLiquidity{
+                assets:assets2,
                 slippage_tolerance:Some(f64_to_dec(0.5)),
                 auto_stake:None,
                 receiver:None
@@ -123,7 +131,7 @@ fn pool_manager_works() {
         let msg = Cw20ExecuteMsg::IncreaseAllowance {
                 spender: pool_manager.to_string(),
                 expires: None,
-                amount:(2*n).into(),
+                amount:(100*n).into(),
             };
         
         app.execute_contract(owner.clone(), token_x.clone(), &msg, &[])
@@ -132,32 +140,46 @@ fn pool_manager_works() {
         
         app.execute_contract(owner.clone(), token_y.clone(), &msg, &[])
                 .unwrap();
-
+        app.execute_contract(owner.clone(), token_z.clone(), &msg, &[])
+            .unwrap();
+        
+    
+        
             
         app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
-        app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
+        //app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg, &[]).unwrap();
+        app.execute_contract(owner.clone(), pool_manager.clone(), &provide_msg2, &[]).unwrap();
 
-        let swap_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: String::from("user"),
-                amount: Uint128::from(1000000000u128),
-                msg: to_binary(&Cw20HookMsg::ExecuteSwapOperations {
-                    operations: vec![
-                        SwapOperation::AstroSwap {
-                            offer_asset_info: AssetInfo::Token {
-                                contract_addr: token_y,
-                            },
-                            ask_asset_info: AssetInfo::Token {
-                                contract_addr: token_x,
-                            },
-                        }             
-                    ],
-                    minimum_receive: None,
-                    to: None,
-                    max_spread: None,
-                })
-                .unwrap(),
-            });
-        app.execute_contract(owner.clone(), pool_manager.clone(), &swap_msg, &[])
+        let swap_msg = Cw20ExecuteMsg::Send {
+            contract: pool_manager.clone().to_string(),
+            amount: Uint128::from(10000u128),
+            msg:to_binary(&Cw20HookMsg::ExecuteSwapOperations {
+                operations: vec![
+                    SwapOperation{
+                        offer_asset_info: AssetInfo::Token {
+                            contract_addr: token_x.clone(),
+                        },
+                        ask_asset_info: AssetInfo::Token {
+                            contract_addr: token_y.clone(),
+                        },
+                    },
+                    SwapOperation{
+                        offer_asset_info: AssetInfo::Token {
+                            contract_addr: token_y,
+                        },
+                        ask_asset_info: AssetInfo::Token {
+                            contract_addr: token_z,
+                        },
+                    }             
+                ],
+                minimum_receive: None,
+                to: None,
+                max_spread: None,
+            })
+            .unwrap(),
+        };
+        
+       app.execute_contract(owner.clone(), token_x.clone(), &swap_msg, &[])
             .unwrap();
        
     }

@@ -1,12 +1,10 @@
+use astroport::asset::{Asset, AssetInfo};
 use cosmwasm_std::{Addr, CustomQuery, Order, StdResult, Storage, Uint128};
-use cw_storage_plus::{Item,Map, SnapshotMap};
+use cw_storage_plus::{Item, Map, SnapshotMap};
 use itertools::Itertools;
-use astroport::asset::{AssetInfo,Asset};
-
-
 
 use astroport_pcl_common::{error::PclError, state::Config};
-use cosmwasm_std::{DepsMut};
+use cosmwasm_std::DepsMut;
 /// Stores pool parameters and state.
 
 pub struct Precisions(Vec<(String, u8)>);
@@ -51,8 +49,8 @@ impl<'a> Precisions {
 }
 
 pub const QUEUED_MINT: Item<String> = Item::new("pool_key");
-pub const POOLS:Map<String,Config> = Map::new("pools");
-pub const PAIR_BALANCES:Map<String,Vec<Asset>> = Map::new("pair_balances");
+pub const POOLS: Map<String, Config> = Map::new("pools");
+pub const PAIR_BALANCES: Map<String, Vec<Asset>> = Map::new("pair_balances");
 /// Stores asset balances to query them later at any block height
 pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances",
@@ -60,40 +58,44 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances_change",
     cw_storage_plus::Strategy::EveryBlock,
 );
-pub fn find_asset_index(balances:Vec<Asset>,asset:Asset)->usize{
-    balances.iter()
-    .enumerate()
-    .find(|&r| r.1.info == asset.info)
-    .unwrap()
-    .0
-}
-pub fn increment_asset_balance(deps:&mut DepsMut,key:String,index:usize,amount:Uint128){
-    let mut balances=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
-    
-    balances[index].amount+=amount;
-    PAIR_BALANCES.save(deps.storage,key,&balances);
-}
-pub fn decrease_asset_balance(deps:&mut DepsMut,key:String,index:usize,amount:Uint128){
-    let mut balances=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
-    
-    balances[index].amount-=amount;
-    PAIR_BALANCES.save(deps.storage,key,&balances);
-}
-pub fn increment_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
-    let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
-    for (i,v) in amounts.into_iter().enumerate(){
-        curr[i].amount+=v;
-    }
-    PAIR_BALANCES.save(deps.storage,key,&curr);
+pub fn find_asset_index(deps: &mut DepsMut, key: String, asset: Asset) -> usize {
+    let balances = PAIR_BALANCES.load(deps.storage, key.clone()).unwrap();
+
+    balances
+        .iter()
+        .enumerate()
+        .find(|&r| r.1.info == asset.info)
+        .unwrap()
+        .0
 }
 
-pub fn decrease_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
-    let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
-    for (i,v) in amounts.into_iter().enumerate(){
-        println!("{} {} {}",curr[i],v, "amounts");
-        curr[i].amount-=v;
+pub fn increment_asset_balance(deps: &mut DepsMut, key: String, index: usize, amount: Uint128) {
+    let mut balances = PAIR_BALANCES.load(deps.storage, key.clone()).unwrap();
+
+    balances[index].amount += amount;
+    PAIR_BALANCES.save(deps.storage, key, &balances);
+}
+pub fn decrease_asset_balance(deps: &mut DepsMut, key: String, index: usize, amount: Uint128) {
+    let mut balances = PAIR_BALANCES.load(deps.storage, key.clone()).unwrap();
+
+    balances[index].amount -= amount;
+    PAIR_BALANCES.save(deps.storage, key, &balances);
+}
+pub fn increment_pair_balances(deps: &mut DepsMut, key: String, amounts: Vec<Uint128>) {
+    let mut curr = PAIR_BALANCES.load(deps.storage, key.clone()).unwrap();
+    for (i, v) in amounts.into_iter().enumerate() {
+        curr[i].amount += v;
     }
-    PAIR_BALANCES.save(deps.storage,key,&curr);
+    PAIR_BALANCES.save(deps.storage, key, &curr);
+}
+
+pub fn decrease_pair_balances(deps: &mut DepsMut, key: String, amounts: Vec<Uint128>) {
+    let mut curr = PAIR_BALANCES.load(deps.storage, key.clone()).unwrap();
+    for (i, v) in amounts.into_iter().enumerate() {
+        println!("{} {} {}", curr[i], v, "amounts");
+        curr[i].amount -= v;
+    }
+    PAIR_BALANCES.save(deps.storage, key, &curr);
 }
 
 pub fn pair_key(asset_infos: &[AssetInfo]) -> Vec<u8> {
@@ -105,4 +107,3 @@ pub fn pair_key(asset_infos: &[AssetInfo]) -> Vec<u8> {
         .copied()
         .collect()
 }
-

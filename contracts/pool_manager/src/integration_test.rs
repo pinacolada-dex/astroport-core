@@ -246,7 +246,7 @@ fn test_native_to_token_swap() {
     app.execute_contract(owner.clone(), token_x.clone(), &msg, &[])
         .unwrap();
     let arch = n * 1000000000000000;
-    let r = mint_native(&mut app, DENOM, 10*arch, &owner);
+    let r = mint_native(&mut app, DENOM, 10 * arch, &owner);
     let pair = helper
         .create_pair(
             &mut app,
@@ -295,11 +295,16 @@ fn test_native_to_token_swap() {
         to: None,
         max_spread: None,
     };
-    app.execute_contract(owner.clone(), pool_manager.clone(), &swap_msg, &[Coin {
-        denom: String::from(DENOM),
-        amount: (1000000000*n).into(),
-    }])
-        .unwrap();
+    app.execute_contract(
+        owner.clone(),
+        pool_manager.clone(),
+        &swap_msg,
+        &[Coin {
+            denom: String::from(DENOM),
+            amount: (1000000000 * n).into(),
+        }],
+    )
+    .unwrap();
 }
 #[test]
 fn test_token_to_native_swap() {
@@ -362,15 +367,14 @@ fn test_token_to_native_swap() {
     app.execute_contract(owner.clone(), token_x.clone(), &msg, &[])
         .unwrap();
     let arch = n * 1000000000000000;
-    let r = mint_native(&mut app, DENOM, 10*arch, &owner);
+    let r = mint_native(&mut app, DENOM, 10 * arch, &owner);
     let pair = helper
         .create_pair(
             &mut app,
             &owner,
             [
-                
-                token_asset_info(token_x.clone()),
                 native_asset_info(String::from(DENOM)),
+                token_asset_info(token_x.clone()),
             ],
             Some(to_binary(&params).unwrap()),
         )
@@ -378,8 +382,8 @@ fn test_token_to_native_swap() {
     let m = 100_000_000_000_000u128;
 
     let assets1 = [
-        token_asset(token_x.clone(), m.into()),
         native_asset(String::from(DENOM), arch.into()),
+        token_asset(token_x.clone(), m.into()),
     ]
     .to_vec();
 
@@ -399,27 +403,24 @@ fn test_token_to_native_swap() {
         }],
     )
     .unwrap();
-let swap_msg = Cw20ExecuteMsg::Send {
-    contract: pool_manager.clone().to_string(),
-    amount: Uint128::from(1000000000u128),
-    msg: to_binary(&Cw20HookMsg::ExecuteSwapOperations {
-        operations: vec![
-            SwapOperation {
+    let swap_msg = Cw20ExecuteMsg::Send {
+        contract: pool_manager.clone().to_string(),
+        amount: Uint128::from(1000000000u128),
+        msg: to_binary(&Cw20HookMsg::ExecuteSwapOperations {
+            operations: vec![SwapOperation {
                 offer_asset_info: AssetInfo::Token {
                     contract_addr: token_x.clone(),
                 },
                 ask_asset_info: AssetInfo::NativeToken {
                     denom: String::from(DENOM),
                 },
-            },
-            
-        ],
-        minimum_receive: None,
-        to: None,
-        max_spread: None,
-    })
-    .unwrap(),
-};
+            }],
+            minimum_receive: None,
+            to: None,
+            max_spread: None,
+        })
+        .unwrap(),
+    };
     app.execute_contract(owner.clone(), token_x.clone(), &swap_msg, &[])
         .unwrap();
 }

@@ -370,7 +370,10 @@ pub fn execute_withdraw_liquidity(
 ) -> Result<Response, ContractError> {
     let pool = generate_key_from_assets(&assets);
     let mut config = POOLS.load(deps.storage, pool.clone())?;
-
+    println!(
+        "{} {}",
+        config.pair_info.liquidity_token, "LIQUIDITY TOKEN ADDRESS"
+    );
     if info.sender != config.pair_info.liquidity_token {
         return Err(ContractError::Unauthorized {});
     }
@@ -383,13 +386,17 @@ pub fn execute_withdraw_liquidity(
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?;
     let mut messages = vec![];
 
-    let refund_assets = if assets.is_empty() {
+    let refund_assets =
+        get_share_in_assets(&pools, amount.saturating_sub(Uint128::one()), total_share);
+    // Commented this out
+    /*  let refund_assets = if assets.is_empty() {
         // Usual withdraw (balanced)
         get_share_in_assets(&pools, amount.saturating_sub(Uint128::one()), total_share)
     } else {
         return Err(StdError::generic_err("Imbalanced withdraw is currently disabled").into());
     };
-
+    */
+    println!("CP");
     // decrease XCP
     let mut xs = pools.iter().map(|a| a.amount).collect_vec();
 

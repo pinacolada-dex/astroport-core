@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt::Display;
+use std::ops::Add;
 use std::str::FromStr;
 
 use crate::error::ContractError;
@@ -9,7 +10,9 @@ use crate::factory_helper::{instantiate_token, mint, mint_native, FactoryHelper}
 use crate::msg::Cw20HookMsg;
 use crate::msg::ExecuteMsg;
 use crate::msg::SwapOperation;
-use astroport::asset::{native_asset, native_asset_info, token_asset, token_asset_info, AssetInfo};
+use astroport::asset::{
+    native_asset, native_asset_info, token_asset, token_asset_info, Asset, AssetInfo,
+};
 use astroport::factory::PairType;
 use astroport::pair_concentrated::{
     ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams, QueryMsg,
@@ -167,7 +170,7 @@ fn pool_manager_works() {
                 },
                 SwapOperation {
                     offer_asset_info: AssetInfo::Token {
-                        contract_addr: token_y,
+                        contract_addr: token_y.clone(),
                     },
                     ask_asset_info: AssetInfo::Token {
                         contract_addr: token_z,
@@ -183,6 +186,37 @@ fn pool_manager_works() {
 
     app.execute_contract(owner.clone(), token_x.clone(), &swap_msg, &[])
         .unwrap();
+    let withdraw_liq_msg = Cw20HookMsg::WithdrawLiquidity {
+        assets: [
+            Asset {
+                info: AssetInfo::Token {
+                    contract_addr: token_x.clone(),
+                },
+                /// A token amount
+                amount: Uint128::from(1000000_u128),
+            },
+            Asset {
+                info: AssetInfo::Token {
+                    contract_addr: token_y.clone(),
+                },
+                /// A token amount
+                amount: Uint128::from(1000000_u128),
+            },
+        ]
+        .to_vec(),
+    };
+    let withdraw_msg = Cw20ExecuteMsg::Send {
+        contract: pool_manager.clone().to_string(),
+        amount: Uint128::from(1000000_u128),
+        msg: to_binary(&withdraw_liq_msg).unwrap(),
+    };
+    app.execute_contract(
+        owner.clone(),
+        Addr::unchecked("contract4"),
+        &withdraw_msg,
+        &[],
+    )
+    .unwrap();
 }
 
 #[test]

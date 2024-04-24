@@ -1,4 +1,4 @@
-use astroport::asset::{addr_opt_validate, Asset};
+use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
 use astroport::pair::PoolResponse;
 use astroport::querier::query_supply;
 
@@ -19,7 +19,7 @@ use astroport::router::{
 
 use crate::msg::{ExecuteMsg,QueryMsg,Cw20HookMsg};
 use crate::error::ContractError;
-use crate::handlers::{execute_create_pair, execute_provide_liquidity, execute_swap_operations, execute_withdraw_liquidity, generate_key_from_asset_info, generate_key_from_assets};
+use crate::handlers::{execute_create_pair, execute_provide_liquidity, execute_swap_operations, execute_withdraw_liquidity, generate_key_from_asset_info, generate_key_from_assets, DENOM};
 
 use crate::query::simulate_swap_operations;
 use crate::state::{ PAIR_BALANCES, POOLS, QUEUED_MINT};
@@ -81,9 +81,10 @@ pub fn execute(
             to,
             max_spread,
         } => {
-            let amount=must_pay(&info,"arch").unwrap();
+            assert_eq!(operations[0].clone().offer_asset_info,AssetInfo::NativeToken { denom: String::from(DENOM) });
+            let amount=must_pay(&info,DENOM).unwrap();
             assert!(!amount.is_zero(),"Cannot Swap with Zero Input");
-            
+            println!("{} {}",amount,"VALUE to be Swapped");
             execute_swap_operations(
             &mut deps,
             env,

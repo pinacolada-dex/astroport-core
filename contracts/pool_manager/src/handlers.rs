@@ -116,7 +116,7 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
     let pool_key=generate_key_from_assets(&assets);
    
     let mut config = POOLS.load(deps.storage,pool_key.clone())?;
-    println!("{:?}",config);
+    println!("{:?} {}",config,String::from("CONFIG HERE "));
     println!("{:?}",assets.len());
     match assets.len() {
         0 => {
@@ -163,7 +163,7 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
         Decimal256::with_precision(assets[0].amount, precisions.get_precision(&assets[0].info)?)?,
         Decimal256::with_precision(assets[1].amount, precisions.get_precision(&assets[1].info)?)?,
     ];
-    println!("QUERY SHAREE");
+    println!("QUERY SHARE");
     println!("{}",&config.pair_info.liquidity_token);
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
@@ -173,8 +173,10 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
         return Err(ContractError::InvalidZeroAmount {});
     }
     println!("TRANSFERRING TOKENS");
+    increment_pair_balances( deps ,pool_key.clone(),[assets[0].amount,assets[1].amount].to_vec());
     let mut messages = vec![];
     for (i, pool) in pools.iter_mut().enumerate() {
+        println!("{} {}",pool.amount,"the current pool amount");
         // If the asset is a token contract, then we need to execute a TransferFrom msg to receive assets
         match &pool.info {
             AssetInfo::Token { contract_addr } => {
@@ -192,13 +194,14 @@ pub fn execute_provide_liquidity( deps: &mut DepsMut,
                 }
             }
             AssetInfo::NativeToken { .. } => {
+                
                 // If the asset is native token, the pool balance is already increased
                 // To calculate the total amount of deposits properly, we should subtract the user deposit from the pool
-                pool.amount = pool.amount.checked_sub(deposits[i])?;
+                //pool.amount = pool.amount.checked_sub(deposits[i])?;
             }
         }
     }
-    increment_pair_balances( deps ,pool_key.clone(),[assets[0].amount,assets[1].amount].to_vec());
+   
     let mut new_xp = pools
         .iter()
         .enumerate()
@@ -568,8 +571,9 @@ pub fn execute_swap_operations(
                     info: offer_asset_info.clone(),
                     amount:return_amount,
                 };
+                println!("{} {}","POOOOL",pool_key);
                 let return_amount=swap_internal(deps,&env,pool_key,offer_asset,Some(Decimal::MAX),max_spread).unwrap();
-        
+                println!("{} {}","TRANSFERRING",return_amount);
                
                 match ask_asset_info{
                     AssetInfo::Token { contract_addr }=>{
@@ -636,26 +640,26 @@ fn swap_internal(
     let precisions = Precisions::new(deps.storage)?;
     let offer_asset_prec = precisions.get_precision(&offer_asset.info)?;
     let offer_asset_dec = offer_asset.to_decimal_asset(offer_asset_prec)?;
-    println!("{:?}",pool_key);
+    println!("{:?} {}",offer_asset_dec,"OFFER AMOUNT AS DEC");
+    
     let mut config = POOLS.load(deps.storage,pool_key.clone())?;
     increment_pair_balances(deps,pool_key.clone(),[offer_asset.amount,Uint128::zero()].to_vec());
     let mut pools = query_pools(&deps,&config, &precisions)?;
 
-
+    println!("{:?} {}",pools,"THE POOL!!!!!!!!!!");
     let (offer_ind, _) = pools
         .iter()
         .find_position(|asset| asset.info == offer_asset_dec.info)
         .ok_or_else(|| ContractError::InvalidAsset(offer_asset_dec.info.to_string()))?;
     let ask_ind = 1 ^ offer_ind;
     let ask_asset_prec = precisions.get_precision(&pools[ask_ind].info)?;
-
+    println!("{},{}",pools[offer_ind].amount,"SUBTRACTION");
     pools[offer_ind].amount -= offer_asset_dec.amount;
 
     before_swap_check(&pools, offer_asset_dec.amount)?;
 
     let mut xs = pools.iter().map(|asset| asset.amount).collect_vec();
-    println!("XS");
-    println!("{:?}",xs);
+    println!("{:?} {}",xs,"XS!!!!!!!!!!");
 
     let swap_result = compute_swap(
         &xs,
@@ -670,6 +674,7 @@ fn swap_internal(
     xs[ask_ind] -= swap_result.dy + swap_result.maker_fee + swap_result.share_fee;
 
     let return_amount = swap_result.dy.to_uint(ask_asset_prec)?;
+    println!("{:?} {}",return_amount ,"RT AMT!!!!!!!!!!");
     let spread_amount = swap_result.spread_fee.to_uint(ask_asset_prec)?;
     assert_max_spread(
         belief_price,
@@ -681,7 +686,7 @@ fn swap_internal(
 
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
-   
+    println!("DECREASING");
     decrease_pair_balances(deps,pool_key.clone(),[Uint128::zero(),return_amount].to_vec());
     // Skip very small trade sizes which could significantly mess up the price due to rounding errors,
     // especially if token precisions are 18.

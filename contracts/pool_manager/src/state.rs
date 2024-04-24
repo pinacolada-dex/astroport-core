@@ -60,7 +60,25 @@ pub const BALANCES: SnapshotMap<&AssetInfo, Uint128> = SnapshotMap::new(
     "balances_change",
     cw_storage_plus::Strategy::EveryBlock,
 );
-
+pub fn find_asset_index(balances:Vec<Asset>,asset:Asset)->usize{
+    balances.iter()
+    .enumerate()
+    .find(|&r| r.1.info == asset.info)
+    .unwrap()
+    .0
+}
+pub fn increment_asset_balance(deps:&mut DepsMut,key:String,index:usize,amount:Uint128){
+    let mut balances=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
+    
+    balances[index].amount+=amount;
+    PAIR_BALANCES.save(deps.storage,key,&balances);
+}
+pub fn decrease_asset_balance(deps:&mut DepsMut,key:String,index:usize,amount:Uint128){
+    let mut balances=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
+    
+    balances[index].amount-=amount;
+    PAIR_BALANCES.save(deps.storage,key,&balances);
+}
 pub fn increment_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
     let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
@@ -72,6 +90,7 @@ pub fn increment_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>
 pub fn decrease_pair_balances(deps:&mut DepsMut,key:String,amounts:Vec<Uint128>){
     let mut curr=PAIR_BALANCES.load(deps.storage,key.clone()).unwrap();
     for (i,v) in amounts.into_iter().enumerate(){
+        println!("{} {} {}",curr[i],v, "amounts");
         curr[i].amount-=v;
     }
     PAIR_BALANCES.save(deps.storage,key,&curr);

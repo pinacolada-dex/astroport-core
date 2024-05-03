@@ -305,12 +305,12 @@ impl PoolState {
         cur_xs: &[Decimal256],
         cur_price: Decimal256,
     ) -> StdResult<()> {
-        println!("getting price state");
+        //println!("getting price state");
         let amp_gamma = self.get_amp_gamma(env);
         let block_time = env.block.time.seconds();
         let price_state = &mut self.price_state;
-        println!("getting price state");
-        println!("{:?}",price_state);
+        //println!("getting price state");
+        //println!("{:?}",price_state);
         if price_state.last_price_update < block_time {
             let arg = Decimal256::from_ratio(
                 block_time - price_state.last_price_update,
@@ -326,11 +326,11 @@ impl PoolState {
         let cur_d = calc_d(cur_xs, &amp_gamma)?;
 
         let xcp = get_xcp(cur_d, price_state.price_scale);
-        println!("{:?}",xcp);
+        //println!("{:?}",xcp);
         if !price_state.xcp_profit_real.is_zero() {
             let xcp_profit_real = xcp / total_lp;
-            println!("{:?}",xcp_profit_real);
-            println!("{:?}",price_state.xcp_profit_real);
+            //println!("{:?}",xcp_profit_real);
+            //println!("{:?}",price_state.xcp_profit_real);
             // If xcp dropped and no ramping happens then this swap makes loss
             if xcp_profit_real < price_state.xcp_profit_real && block_time >= self.future_time {
                 return Err(StdError::generic_err(
@@ -344,7 +344,7 @@ impl PoolState {
         }
 
         let xcp_profit = price_state.xcp_profit;
-        println!("getting norm");
+        //println!("getting norm");
         let norm = (price_state.oracle_price / price_state.price_scale).diff(Decimal256::one());
         let scale_delta = Decimal256::from(pool_params.min_price_scale_delta)
             .max(norm * Decimal256::from_ratio(1u8, 10u8));
@@ -627,11 +627,11 @@ mod test {
         let offer_ind = 1 - ask_ind;
 
         let mut xs = ext_xs.to_vec();
-        println!("Before swap: {} {}", xs[0], xs[1]);
+        //println!("Before swap: {} {}", xs[0], xs[1]);
 
         // internal repr
         xs[1] *= price_scale;
-        println!("Before swap (internal): {} {}", xs[0], xs[1]);
+        //println!("Before swap (internal): {} {}", xs[0], xs[1]);
 
         let cur_d = calc_d(&xs, amp_gamma).unwrap();
 
@@ -645,7 +645,7 @@ mod test {
         let mut ask_amount = xs[ask_ind] - calc_y(&xs, cur_d, amp_gamma, ask_ind).unwrap();
         xs[ask_ind] -= ask_amount;
         let fee = ask_amount * pool_params.fee(&xs);
-        println!("fee {fee} ({}%)", pool_params.fee(&xs));
+        //println!("fee {fee} ({}%)", pool_params.fee(&xs));
         xs[ask_ind] += fee;
         ask_amount -= fee;
 

@@ -176,7 +176,7 @@ mod tests {
     }
 
     fn compute(x1: f64, x2: f64, a: f64, gamma: f64) -> AnyResult<()> {
-        println!("{x1}, {x2}, a: {a}");
+        //println!("{x1}, {x2}, a: {a}");
         let xp = [x1, x2];
 
         let x1_dec = f64_to_dec(x1);
@@ -229,7 +229,7 @@ mod tests {
         let gamma = 0.000145;
         let d = 2064.855164704653967332;
 
-        println!("Pool before [{} {}]", x0, x1);
+        //println!("Pool before [{} {}]", x0, x1);
         let new_x1 = newton_y(
             &[f64_to_dec(x0 + offer_amount), f64_to_dec(x1)],
             f64_to_dec(amp),
@@ -239,8 +239,8 @@ mod tests {
         )
         .unwrap();
         let new_x1 = dec_to_f64(new_x1);
-        println!("Pool after [{} {}]", x0 + offer_amount, new_x1);
-        println!("Diff [{} {}]", offer_amount, new_x1 - x1);
+        //println!("Pool after [{} {}]", x0 + offer_amount, new_x1);
+        //println!("Diff [{} {}]", offer_amount, new_x1 - x1);
         assert!(new_x1 < x1, "new x1 {new_x1} should be less than x1 {x1}");
     }
 

@@ -2,6 +2,7 @@ use astroport::asset::{addr_opt_validate, Asset, AssetInfo};
 use astroport::pair::PoolResponse;
 use astroport::querier::query_supply;
 
+
 use astroport_pcl_common::utils::check_cw20_in_pool;
 use cosmwasm_std::{
     entry_point, from_binary, to_binary, Addr, Api, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response, StdError, StdResult, SubMsgResponse, SubMsgResult, Uint128
@@ -12,7 +13,6 @@ use cw_utils::{must_pay, parse_instantiate_response_data};
 
 use crate::msg::SwapOperation;
 
-
 use astroport::router::{
     InstantiateMsg, MigrateMsg,
 };
@@ -21,7 +21,7 @@ use crate::msg::{ExecuteMsg,QueryMsg,Cw20HookMsg};
 use crate::error::ContractError;
 use crate::handlers::{execute_create_pair, execute_provide_liquidity, execute_swap_operations, execute_withdraw_liquidity, generate_key_from_asset_info, generate_key_from_assets, DENOM};
 
-use crate::query::simulate_swap_operations;
+use crate::query::{query_compute_d, query_lp_price, simulate_swap_operations,query_config};
 use crate::state::{ PAIR_BALANCES, POOLS, QUEUED_MINT};
 
 /// Contract name that is used for migration.
@@ -84,7 +84,7 @@ pub fn execute(
             assert_eq!(operations[0].clone().offer_asset_info,AssetInfo::NativeToken { denom: String::from(DENOM) });
             let amount=must_pay(&info,DENOM).unwrap();
             assert!(!amount.is_zero(),"Cannot Swap with Zero Input");
-            println!("{} {}",amount,"VALUE to be Swapped");
+            //println!("{} {}",amount,"VALUE to be Swapped");
             execute_swap_operations(
             &mut deps,
             env,
@@ -117,7 +117,7 @@ pub fn receive_cw20(
             to,
             max_spread,
         } => {
-            println!("{} is {}",info.sender.clone(),String::from("Test"));
+            //println!("{} is {}",info.sender.clone(),String::from("Test"));
             
             let pool_key=generate_key_from_asset_info(&[operations[0].clone().offer_asset_info,operations[0].clone().ask_asset_info].to_vec());
             let config=POOLS.may_load(deps.storage, pool_key.clone()).unwrap();
@@ -182,7 +182,7 @@ pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractE
 ///             operations,
 ///         }** Simulates one or multiple swap operations and returns the end result in a [`SimulateSwapOperationsResponse`] object.
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
        
         QueryMsg::SimulateSwapOperations {
@@ -190,11 +190,15 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
             operations,
         } => Ok(to_binary(&simulate_swap_operations(
             deps,
+            env,
             offer_amount,
             operations,
         )?)?),
         QueryMsg::Pool {pool_key} => Ok(to_binary(&query_pool(deps,pool_key)?)?),
         QueryMsg::Pair {pool_key} => Ok(to_binary(&POOLS.load(deps.storage,pool_key)?.pair_info)?),
+        QueryMsg::ComputeD { pool_key }=>Ok(to_binary(&query_compute_d(deps,env,pool_key)?)?),
+        QueryMsg::Config {pool_key  }=> Ok(to_binary(&query_config(deps,env,pool_key)?)?),
+        QueryMsg::LpPrice {pool_key  }=>Ok(to_binary(&query_lp_price(deps,env,pool_key)?)?),
 }
 }
 fn query_pool(deps: Deps,pool_key:String)->StdResult<PoolResponse>{

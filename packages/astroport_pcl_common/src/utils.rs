@@ -164,14 +164,14 @@ pub fn assert_max_spread(
     if max_spread > MAX_ALLOWED_SLIPPAGE {
         return Err(PclError::AllowedSpreadAssertion {});
     }
-    println!("{}  and {} and {} and {}",max_spread,offer_amount,return_amount,spread_amount);
+    //println!("{}  and {} and {} and {}",max_spread,offer_amount,return_amount,spread_amount);
     if let Some(belief_price) = belief_price {
-        println!("{} {}",belief_price,"There is a belief price");
+        //println!("{} {}",belief_price,"There is a belief price");
         let expected_return = offer_amount
             * belief_price.inv().ok_or_else(|| {
                 StdError::generic_err("Invalid belief_price. Check the input values.")
             })?;
-        println!("{}  and {} and {}",expected_return,return_amount,"EXPECTED RETURN");
+        //println!("{}  and {} and {}",expected_return,return_amount,"EXPECTED RETURN");
         let spread_amount = expected_return.saturating_sub(return_amount);
         
         if return_amount < expected_return
@@ -180,7 +180,7 @@ pub fn assert_max_spread(
             return Err(PclError::MaxSpreadAssertion {});
         }
     } else if Decimal256::from_ratio(spread_amount, return_amount + spread_amount) > max_spread {
-        println!("There is no belief price");
+        //println!("There is no belief price");
         return Err(PclError::MaxSpreadAssertion {});
     }
 

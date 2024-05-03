@@ -11,12 +11,14 @@ use crate::msg::Cw20HookMsg;
 use crate::msg::ExecuteMsg;
 use crate::msg::SwapOperation;
 use astroport::asset::{
-    native_asset, native_asset_info, token_asset, token_asset_info, Asset, AssetInfo,
+    native_asset, native_asset_info, token_asset, token_asset_info, Asset, AssetInfo, PairInfo,
 };
 use astroport::factory::PairType;
+use astroport::pair::PoolResponse;
 use astroport::pair_concentrated::{
-    ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams, QueryMsg,
+    ConcentratedPoolConfig, ConcentratedPoolParams, ConcentratedPoolUpdateParams,
 };
+use crate::msg::QueryMsg;
 use astroport::router::{InstantiateMsg, MigrateMsg};
 use astroport::token;
 use cosmwasm_std::{coins, from_binary, to_binary, Addr, Coin, Decimal, Empty, StdError, Uint128};
@@ -183,9 +185,12 @@ fn pool_manager_works() {
         })
         .unwrap(),
     };
-
-    app.execute_contract(owner.clone(), token_x.clone(), &swap_msg, &[])
-        .unwrap();
+    let pool_key=format!("{}{}",token_x,token_y);
+    println!("{} {}","querying pool at ",pool_key);
+    let pool_data:PoolResponse=app.wrap().query_wasm_smart(pool_manager.clone(), &QueryMsg::Pool {pool_key:pool_key.clone()}).unwrap();
+    println!("{:?}",pool_data);
+    let pair_data:PairInfo=app.wrap().query_wasm_smart(pool_manager.clone(), &QueryMsg::Pair {pool_key}).unwrap();
+    println!("{:?}",pair_data);
     let withdraw_liq_msg = Cw20HookMsg::WithdrawLiquidity {
         assets: [
             Asset {

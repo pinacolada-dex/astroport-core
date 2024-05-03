@@ -131,8 +131,8 @@ pub fn execute_provide_liquidity(
     let pool_key = generate_key_from_assets(&assets);
 
     let mut config = POOLS.load(deps.storage, pool_key.clone())?;
-    println!("{:?} {}", config, String::from("CONFIG HERE "));
-    println!("{:?}", assets.len());
+    //println!("{:?} {}", config, String::from("CONFIG HERE "));
+    //println!("{:?}", assets.len());
 
     match assets.len() {
         0 => {
@@ -162,15 +162,15 @@ pub fn execute_provide_liquidity(
     let first_asset_index = find_asset_index(deps, pool_key.clone(), assets[0].clone());
     let second_asset_index = 1 ^ first_asset_index;
 
-    println!("CHECKING ASSETS");
+    //println!("CHECKING ASSETS");
     check_assets(deps.api, &assets)?;
-    println!("CHECKING SENT");
+    //println!("CHECKING SENT");
     info.funds
         .assert_coins_properly_sent(&assets, &config.pair_info.asset_infos)?;
 
     let precisions = Precisions::new(deps.storage)?;
 
-    println!("QUERY POOLS");
+    //println!("QUERY POOLS");
     let mut pools = query_pools(&deps, &config, &precisions)?;
 
     if pools[0].info.equal(&assets[1].info) {
@@ -182,16 +182,16 @@ pub fn execute_provide_liquidity(
         Decimal256::with_precision(assets[1].amount, precisions.get_precision(&assets[1].info)?)?,
     ];
 
-    println!("QUERY SHARE");
-    println!("{}", &config.pair_info.liquidity_token);
+    //println!("QUERY SHARE");
+    //println!("{}", &config.pair_info.liquidity_token);
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
-    println!("{}", total_share);
+    //println!("{}", total_share);
     // Initial provide can not be one-sided
     if total_share.is_zero() && (deposits[0].is_zero() || deposits[1].is_zero()) {
         return Err(ContractError::InvalidZeroAmount {});
     }
-    println!("TRANSFERRING TOKENS");
+    //println!("TRANSFERRING TOKENS");
     increment_pair_balances(
         deps,
         pool_key.clone(),
@@ -200,7 +200,7 @@ pub fn execute_provide_liquidity(
 
     let mut messages = vec![];
     for (i, pool) in pools.iter_mut().enumerate() {
-        println!("{} {}", pool.amount, "the current pool amount");
+        //println!("{} {}", pool.amount, "the current pool amount");
         // If the asset is a token contract, then we need to execute a TransferFrom msg to receive assets
         match &pool.info {
             AssetInfo::Token { contract_addr } => {
@@ -231,20 +231,20 @@ pub fn execute_provide_liquidity(
         .enumerate()
         .map(|(ind, pool)| pool.amount + deposits[ind])
         .collect_vec();
-    println!("{:?}", new_xp);
+    //println!("{:?}", new_xp);
     new_xp[1] *= config.pool_state.price_state.price_scale;
-    println!("{:?}", new_xp);
+    //println!("{:?}", new_xp);
     let amp_gamma = config.pool_state.get_amp_gamma(&env);
     let new_d = calc_d(&new_xp, &amp_gamma)?;
 
     let share = if total_share.is_zero() {
-        println!("total share is zero");
+        //println!("total share is zero");
         let xcp = get_xcp(new_d, config.pool_state.price_state.price_scale);
-        println!("{:?}", xcp);
+        //println!("{:?}", xcp);
         let mint_amount = xcp
             .checked_sub(MINIMUM_LIQUIDITY_AMOUNT.to_decimal256(LP_TOKEN_PRECISION)?)
             .map_err(|_| ContractError::MinimumLiquidityAmountError {})?;
-        println!("{:?}", mint_amount);
+        //println!("{:?}", mint_amount);
         messages.extend(mint_liquidity_token_message(
             deps.querier,
             &config,
@@ -264,12 +264,12 @@ pub fn execute_provide_liquidity(
 
         mint_amount
     } else {
-        println!("total share note zero");
-        println!("{:?}", pools);
+        //println!("total share note zero");
+        //println!("{:?}", pools);
         let mut old_xp = pools.iter().map(|a| a.amount).collect_vec();
 
         old_xp[1] *= config.pool_state.price_state.price_scale;
-        println!("{:?}", old_xp);
+        //println!("{:?}", old_xp);
         let old_d = calc_d(&old_xp, &amp_gamma)?;
         let share = (total_share * new_d / old_d).saturating_sub(total_share);
 
@@ -281,8 +281,8 @@ pub fn execute_provide_liquidity(
 
     // calculate accrued share
     let share_ratio = share / (total_share + share);
-    println!("share ratio");
-    println!("{:?}", share_ratio);
+    //println!("share ratio");
+    //println!("{:?}", share_ratio);
     let balanced_share = vec![
         new_xp[0] * share_ratio,
         new_xp[1] * share_ratio / config.pool_state.price_state.price_scale,
@@ -295,13 +295,13 @@ pub fn execute_provide_liquidity(
 
     let mut slippage = Decimal256::zero();
 
-    println!("asset difference");
-    println!("{:?}", balanced_share);
+    //println!("asset difference");
+    //println!("{:?}", balanced_share);
 
-    println!("{:?}", assets_diff);
+    //println!("{:?}", assets_diff);
     // If deposit doesn't diverge too much from the balanced share, we don't update the price
     if assets_diff[0] >= MIN_TRADE_SIZE && assets_diff[1] >= MIN_TRADE_SIZE {
-        println!("UPDATING PRICE");
+        //println!("UPDATING PRICE");
         slippage = assert_slippage_tolerance(
             &deposits,
             share,
@@ -320,7 +320,7 @@ pub fn execute_provide_liquidity(
     }
 
     let share_uint128 = share.to_uint(LP_TOKEN_PRECISION)?;
-    //println!("UPDATING PRICE");
+    ////println!("UPDATING PRICE");
     // Mint LP tokens for the sender or for the receiver (if set)
     let receiver = addr_opt_validate(deps.api, &receiver)?.unwrap_or_else(|| info.sender.clone());
     let auto_stake = auto_stake.unwrap_or(false);
@@ -370,10 +370,7 @@ pub fn execute_withdraw_liquidity(
 ) -> Result<Response, ContractError> {
     let pool = generate_key_from_assets(&assets);
     let mut config = POOLS.load(deps.storage, pool.clone())?;
-    println!(
-        "{} {}",
-        config.pair_info.liquidity_token, "LIQUIDITY TOKEN ADDRESS"
-    );
+   ;
     if info.sender != config.pair_info.liquidity_token {
         return Err(ContractError::Unauthorized {});
     }
@@ -389,6 +386,7 @@ pub fn execute_withdraw_liquidity(
     let refund_assets =
         get_share_in_assets(&pools, amount.saturating_sub(Uint128::one()), total_share);
     // Commented this out
+    // Not sure sure about the meaning of imbalanced withdraw
     /*  let refund_assets = if assets.is_empty() {
         // Usual withdraw (balanced)
         get_share_in_assets(&pools, amount.saturating_sub(Uint128::one()), total_share)
@@ -396,7 +394,7 @@ pub fn execute_withdraw_liquidity(
         return Err(StdError::generic_err("Imbalanced withdraw is currently disabled").into());
     };
     */
-    println!("CP");
+    //println!("CP");
     // decrease XCP
     let mut xs = pools.iter().map(|a| a.amount).collect_vec();
 
@@ -539,7 +537,7 @@ pub fn execute_create_pair(
     }
 
     let key = generate_key_from_asset_info(&asset_infos);
-    println!("{:?}", key);
+    //println!("{:?}", key);
     POOLS.save(deps.storage, key.clone(), &config)?;
     PAIR_BALANCES.save(deps.storage, key.clone(), &balances)?;
     //BufferManager::init(deps.storage, OBSERVATIONS, OBSERVATIONS_SIZE)?;
@@ -609,7 +607,7 @@ pub fn execute_swap_operations(
                 info: offer_asset_info.clone(),
                 amount: return_amount,
             };
-            println!("{} {}", "POOOOL", pool_key);
+            //println!("{} {}", "POOOOL", pool_key);
             let return_amount = swap_internal(
                 deps,
                 &env,
@@ -619,7 +617,7 @@ pub fn execute_swap_operations(
                 max_spread,
             )
             .unwrap();
-            println!("{} {}", "TRANSFERRING", return_amount);
+            //println!("{} {}", "TRANSFERRING", return_amount);
 
             match ask_asset_info {
                 AssetInfo::Token { contract_addr } => {
@@ -644,7 +642,7 @@ pub fn execute_swap_operations(
                 info: offer_asset_info.clone(),
                 amount: return_amount,
             };
-            println!("{}", pool_key);
+            //println!("{}", pool_key);
             let result = swap_internal(
                 deps,
                 &env,
@@ -694,13 +692,13 @@ fn swap_internal(
     let mut pools = query_pools(&deps, &config, &precisions)?;
 
     let ask_asset_prec = precisions.get_precision(&pools[ask_ind].info)?;
-    println!("{},{}", pools[offer_ind].amount, "SUBTRACTION");
+    //println!("{},{}", pools[offer_ind].amount, "SUBTRACTION");
     pools[offer_ind].amount -= offer_asset_dec.amount;
 
     before_swap_check(&pools, offer_asset_dec.amount)?;
 
     let mut xs = pools.iter().map(|asset| asset.amount).collect_vec();
-    println!("{:?} {}", xs, "XS!!!!!!!!!!");
+    //println!("{:?} {}", xs, "XS!!!!!!!!!!");
 
     let swap_result = compute_swap(
         &xs,
@@ -715,7 +713,7 @@ fn swap_internal(
     xs[ask_ind] -= swap_result.dy + swap_result.maker_fee + swap_result.share_fee;
 
     let return_amount = swap_result.dy.to_uint(ask_asset_prec)?;
-    println!("{:?} {}", return_amount, "RT AMT!!!!!!!!!!");
+    //println!("{:?} {}", return_amount, "RT AMT!!!!!!!!!!");
     let spread_amount = swap_result.spread_fee.to_uint(ask_asset_prec)?;
     assert_max_spread(
         belief_price,
@@ -727,7 +725,7 @@ fn swap_internal(
 
     let total_share = query_supply(&deps.querier, &config.pair_info.liquidity_token)?
         .to_decimal256(LP_TOKEN_PRECISION)?;
-    println!("DECREASING");
+    //println!("DECREASING");
     decrease_asset_balance(deps, pool_key.clone(), ask_ind, return_amount);
     // Skip very small trade sizes which could significantly mess up the price due to rounding errors,
     // especially if token precisions are 18.
